@@ -1,11 +1,18 @@
 {
-  "marketplace": "claude-intelligence-plugin",
+  "name": "Ideas of Stuff to Learn",
+  "owner": {
+    "name": "Ideas-of-stuff-to-learn",
+    "url": "https://github.com/Ideas-of-stuff-to-learn"
+  },
   "plugins": [
     {
       "name": "claude-intelligence-plugin",
       "version": "0.1.0",
       "description": "Reusable skills, hooks, subagents and templates for Claude Code projects",
-      "repo": "Ideas-of-stuff-to-learn/claude-intelligence-plugin"
+      "source": {
+        "source": "github",
+        "repo": "Ideas-of-stuff-to-learn/claude-intelligence-plugin"
+      }
     }
   ]
 }
