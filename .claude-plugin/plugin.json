@@ -1,0 +1,7 @@
+{
+  "name": "claude-intelligence-plugin",
+  "version": "0.1.0",
+  "description": "Reusable skills, hooks, subagents and templates for Claude Code projects",
+  "author": "Ideas-of-stuff-to-learn",
+  "homepage": "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
+}
