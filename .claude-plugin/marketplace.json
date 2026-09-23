@@ -10,8 +10,8 @@
       "version": "0.1.0",
       "description": "Reusable skills, hooks, subagents and templates for Claude Code projects",
       "source": {
-        "source": "git",
-        "url": "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
+        "source": "archive",
+        "url": "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/archive/refs/heads/main.zip"
       }
     }
   ]
