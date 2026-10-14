@@ -247,6 +247,18 @@ def version_check(project_dir: str, plugin_dir: str) -> list:
 # install command
 # ---------------------------------------------------------------------------
 
+def find_repo_root(start: str) -> str:
+    """Walk up from start until we find a .git directory. Returns start if not found."""
+    current = Path(start).resolve()
+    for directory in [current, *current.parents]:
+        if (directory / '.git').exists():
+            if directory != current:
+                print(f"[ci] Not at repo root — using: {directory}")
+            return str(directory)
+    print(f"[ci] Warning: no .git found above {start}, using as-is")
+    return start
+
+
 def cmd_install(project_dir: str) -> None:
     """Install or upgrade the intelligence system in a repo."""
     project_dir = Path(project_dir)
@@ -459,6 +471,7 @@ def main():
         cmd_log_event(proj, args[1], args[2], args[3])
     elif cmd == 'install':
         project_dir = args[1] if len(args) > 1 else str(proj)
+        project_dir = find_repo_root(project_dir)
         cmd_install(project_dir)
     elif cmd == 'setup-alias':
         plugin_dir = str(Path(__file__).resolve().parent.parent)
