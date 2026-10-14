@@ -369,45 +369,79 @@ def cmd_install(project_dir: str) -> None:
 # setup-alias command
 # ---------------------------------------------------------------------------
 
-def cmd_repos() -> None:
-    """List all registered repos and optionally cd into one."""
-    try:
-        sys.path.insert(0, str(Path(__file__).parent))
-        from registry import list_projects
-        projects = list_projects()
-    except Exception:
-        projects = []
+def find_local_git_repos(max_depth: int = 4) -> list:
+    """Scan common locations for git repos. Fast — stops descending into .git dirs."""
+    home = Path.home()
+    search_roots = [home]
+    # Also include common project folder names under home
+    for name in ('projects', 'work', 'code', 'dev', 'src', 'repos', 'git',
+                 'workspace', 'Sites', 'Developer', 'Documents'):
+        candidate = home / name
+        if candidate.is_dir():
+            search_roots.append(candidate)
 
-    if not projects:
-        print("No repos registered yet. Run 'ci install' inside a repo to register it.")
-        return
+    found = set()
 
-    print("Registered repos:\n")
-    for i, p in enumerate(projects, 1):
-        name = p.get('name', Path(p['path']).name)
-        path = p['path']
-        last = p.get('last_seen', '')[:10]
-        exists = '[OK]' if Path(path).exists() else '[missing]'
-        print(f"  {i}) {name}  {exists}  {path}  (last seen {last})")
+    def walk(path: Path, depth: int):
+        if depth == 0:
+            return
+        try:
+            for entry in path.iterdir():
+                if not entry.is_dir() or entry.name.startswith('.'):
+                    continue
+                if (entry / '.git').exists():
+                    found.add(str(entry.resolve()))
+                    # Don't recurse into repos
+                else:
+                    walk(entry, depth - 1)
+        except PermissionError:
+            pass
 
+    for root in search_roots:
+        walk(root, max_depth)
+
+    return sorted(found, key=lambda p: Path(p).name.lower())
+
+
+def print_repo_list_and_pick(repos: list) -> None:
+    """Print a numbered list of repo paths and offer a cd command."""
+    for i, path in enumerate(repos, 1):
+        name = Path(path).name
+        has_plugin = '[ci]' if (Path(path) / '.ai').exists() else '    '
+        print(f"  {i}) {has_plugin}  {name}  —  {path}")
+
+    print()
+    print("  [ci] = claude intelligence plugin installed")
     print()
     try:
         choice = input("Enter number to print cd command (or Enter to skip): ").strip()
     except (EOFError, KeyboardInterrupt):
+        print()
         return
 
     if not choice:
         return
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(projects):
-            path = projects[idx]['path']
-            # Print the cd command — the shell wrapper can eval it
-            print(f"\nRun this to navigate there:\n  cd \"{path}\"")
+        if 0 <= idx < len(repos):
+            print(f"\n  cd \"{repos[idx]}\"")
         else:
             print("Invalid selection.")
     except ValueError:
         print("Invalid input.")
+
+
+def cmd_repos() -> None:
+    """Scan for local git repos and offer navigation."""
+    print("Scanning for git repos...\n")
+    repos = find_local_git_repos()
+
+    if not repos:
+        print("No git repos found in common locations under your home directory.")
+        return
+
+    print(f"Found {len(repos)} git repo(s):\n")
+    print_repo_list_and_pick(repos)
 
 
 def is_in_repo(proj: Path) -> bool:
@@ -426,45 +460,18 @@ REPO_REQUIRED_CMDS = {
 
 
 def not_in_repo_prompt(proj: Path) -> None:
-    """Warn the user they're not in a repo and offer registered repos."""
+    """Warn the user they're not in a repo, scan for local git repos and offer navigation."""
     print(f"[ci] Not inside a git repo (checked from: {proj})")
     print()
-    try:
-        sys.path.insert(0, str(Path(__file__).parent))
-        from registry import list_projects
-        projects = list_projects()
-    except Exception:
-        projects = []
+    print("Scanning for git repos...\n")
+    repos = find_local_git_repos()
 
-    if not projects:
-        print("No registered repos found. Navigate to a repo and run 'ci install'.")
+    if not repos:
+        print("No git repos found. Navigate to a repo and run 'ci install'.")
         sys.exit(1)
 
-    print("Your registered repos:\n")
-    for i, p in enumerate(projects, 1):
-        name = p.get('name', Path(p['path']).name)
-        path = p['path']
-        exists = '[OK]' if Path(path).exists() else '[missing]'
-        print(f"  {i}) {name}  {exists}  {path}")
-
-    print()
-    try:
-        choice = input("Enter number to print cd command (or Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        sys.exit(1)
-
-    if not choice:
-        sys.exit(1)
-    try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(projects):
-            path = projects[idx]['path']
-            print(f"\nRun this to navigate there:\n  cd \"{path}\"")
-        else:
-            print("Invalid selection.")
-    except ValueError:
-        print("Invalid input.")
+    print(f"Found {len(repos)} git repo(s):\n")
+    print_repo_list_and_pick(repos)
     sys.exit(1)
 
 
