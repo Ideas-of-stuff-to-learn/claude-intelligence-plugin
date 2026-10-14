@@ -434,8 +434,7 @@ def main():
     proj = get_proj()
     args = sys.argv[1:]
     if not args:
-        print(__doc__)
-        sys.exit(0)
+        args = ['help']
     cmd = args[0]
     if cmd == 'status':
         project_dir = args[1] if len(args) > 1 else str(proj)
@@ -476,9 +475,28 @@ def main():
     elif cmd == 'setup-alias':
         plugin_dir = str(Path(__file__).resolve().parent.parent)
         cmd_setup_alias(plugin_dir)
+    elif cmd in ('help', '--help', '-h'):
+        print("""ci — Claude Intelligence Plugin
+
+USAGE
+  ci <command> [args]
+
+COMMANDS
+  install          Install or upgrade plugin in current repo (walks up to repo root)
+  status           Show index health and stats
+  health           Check all components
+  search <term>    Full-text search the knowledge index
+  events           Show recent telemetry events
+  budget <desc>    Estimate resource budget for a task
+  dashboard        Start web dashboard at http://localhost:7654
+  rebuild          Rebuild the SQLite index
+  sync             Sync context markdown files into index
+  setup-alias      Add ci to PATH for your shell
+  log-event <type> <component> <status>
+  help             Show this message
+""")
     else:
-        print(f"Unknown command: {cmd}")
-        print(__doc__)
+        print(f"Unknown command: {cmd}\nRun 'ci help' to see all commands.")
         sys.exit(1)
 
 
