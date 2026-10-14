@@ -23,7 +23,7 @@ if (Test-Path $installDir) {
     if ($existingUrl -like "*Ideas-of-stuff-to-learn/claude-intelligence-plugin*") {
         Write-Host "Updating existing installation..."
         & git -C $installDir pull
-        Write-Host "✓ Updated ~/.claude-intel"
+        Write-Host "[OK] Updated ~/.claude-intel"
     } else {
         Write-Warning "~\.claude-intel exists but points to a different repo: $existingUrl"
         Write-Warning "Remove it manually and re-run this script."
@@ -32,16 +32,16 @@ if (Test-Path $installDir) {
 } else {
     Write-Host "Cloning claude-intelligence-plugin..."
     & git clone $RepoUrl $installDir
-    Write-Host "✓ Cloned to ~/.claude-intel"
+    Write-Host "[OK] Cloned to ~/.claude-intel"
 }
 
 # Add to user PATH permanently
 $current = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($current -notlike "*\.claude-intel*") {
     [Environment]::SetEnvironmentVariable("PATH", "$installDir;$current", "User")
-    Write-Host "✓ Added to PATH (restart terminal to apply)"
+    Write-Host "[OK] Added to PATH (restart terminal to apply)"
 } else {
-    Write-Host "✓ PATH already contains ~/.claude-intel (skipping)"
+    Write-Host "[OK] PATH already contains ~/.claude-intel (skipping)"
 }
 
 Write-Host ""
