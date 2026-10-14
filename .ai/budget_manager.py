@@ -350,3 +350,100 @@ if __name__ == "__main__":
     status = get_status(bid, pd)
     rec = adapt_strategy(status)
     print(f"Strategy: {rec.action} ({rec.reason})")
+
+
+# ---------------------------------------------------------------------------
+# Real token usage from Claude Code's ~/.claude/projects/ JSONL transcripts
+# ---------------------------------------------------------------------------
+
+def _claude_projects_dir() -> Path:
+    return Path.home() / '.claude' / 'projects'
+
+
+def read_session_usage(session_id: str = None) -> Dict[str, Any]:
+    """
+    Read actual token usage from Claude Code JSONL transcripts.
+    Deduplicates by requestId (last event wins, matching cctrack behaviour).
+    Returns aggregated totals for one session, or all sessions if None.
+    """
+    projects_dir = _claude_projects_dir()
+    if not projects_dir.exists():
+        return {}
+
+    totals: Dict[str, int] = {
+        'input_tokens': 0,
+        'output_tokens': 0,
+        'cache_creation_input_tokens': 0,
+        'cache_read_input_tokens': 0,
+        'thinking_tokens': 0,
+        'turns': 0,
+    }
+    seen: Dict[str, dict] = {}  # requestId -> usage dict
+
+    import json as _json
+    jsonl_files = list(projects_dir.glob('**/*.jsonl'))
+
+    for jf in jsonl_files:
+        # Filter to specific session if requested
+        if session_id and session_id not in jf.name:
+            continue
+        try:
+            with open(jf, encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        d = _json.loads(line)
+                    except Exception:
+                        continue
+                    if d.get('type') != 'assistant':
+                        continue
+                    msg = d.get('message', {})
+                    if not isinstance(msg, dict):
+                        continue
+                    usage = msg.get('usage')
+                    if not isinstance(usage, dict):
+                        continue
+                    rid = d.get('uuid') or d.get('requestId') or id(d)
+                    seen[str(rid)] = usage
+        except Exception:
+            pass
+
+    for usage in seen.values():
+        totals['input_tokens'] += usage.get('input_tokens', 0)
+        totals['output_tokens'] += usage.get('output_tokens', 0)
+        totals['cache_creation_input_tokens'] += usage.get('cache_creation_input_tokens', 0)
+        totals['cache_read_input_tokens'] += usage.get('cache_read_input_tokens', 0)
+        totals['thinking_tokens'] += (
+            usage.get('output_tokens_details', {}).get('thinking_tokens', 0)
+        )
+        totals['turns'] += 1
+
+    return totals
+
+
+# Anthropic list prices (USD per million tokens) — update as needed
+_PRICES = {
+    'claude-sonnet-4-6': {'input': 3.0,  'output': 15.0, 'cache_read': 0.30, 'cache_write': 3.75},
+    'claude-opus-5-5':   {'input': 15.0, 'output': 75.0, 'cache_read': 1.50, 'cache_write': 18.75},
+    'claude-haiku-5-5':  {'input': 0.80, 'output': 4.0,  'cache_read': 0.08, 'cache_write': 1.0},
+    'default':           {'input': 3.0,  'output': 15.0, 'cache_read': 0.30, 'cache_write': 3.75},
+}
+
+
+def estimate_cost(usage: Dict[str, Any], model: str = 'default') -> Dict[str, float]:
+    """
+    Estimate USD cost from a usage dict returned by read_session_usage().
+    Uses list prices — actual cost may differ (Max plan, discounts, etc.).
+    """
+    prices = _PRICES.get(model, _PRICES['default'])
+    M = 1_000_000
+    cost = {
+        'input':       usage.get('input_tokens', 0) / M * prices['input'],
+        'output':      usage.get('output_tokens', 0) / M * prices['output'],
+        'cache_read':  usage.get('cache_read_input_tokens', 0) / M * prices['cache_read'],
+        'cache_write': usage.get('cache_creation_input_tokens', 0) / M * prices['cache_write'],
+    }
+    cost['total'] = sum(cost.values())
+    return cost

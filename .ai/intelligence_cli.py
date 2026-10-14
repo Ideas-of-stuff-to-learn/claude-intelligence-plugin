@@ -156,16 +156,35 @@ def cmd_events(proj):
 def cmd_budget(proj, task_description):
     try:
         sys.path.insert(0, str(proj / '.ai'))
-        from budget_manager import preflight_estimate
+        from budget_manager import preflight_estimate, read_session_usage, estimate_cost
         est = preflight_estimate(task_description, project_dir=str(proj))
         print(f"Budget estimate for: {task_description[:80]}")
-        print(f"  Tool calls:   {est.estimated_tool_calls}")
-        print(f"  Agent calls:  {est.estimated_agent_calls}")
-        print(f"  Index ops:    {est.estimated_index_ops}")
+        print(f"  Tool calls:   ~{est.estimated_tool_calls}")
+        print(f"  Agent calls:  ~{est.estimated_agent_calls}")
+        print(f"  Index ops:    ~{est.estimated_index_ops}")
         print(f"  Confidence:   {est.confidence}")
-        print(f"  Notes:        {est.notes}")
+        print()
+
+        # Real token usage from Claude Code JSONL transcripts
+        usage = read_session_usage()
+        if usage.get('turns'):
+            cost = estimate_cost(usage)
+            print("Actual usage this session (from ~/.claude/projects/):")
+            print(f"  Input tokens:        {usage['input_tokens']:,}")
+            print(f"  Output tokens:       {usage['output_tokens']:,}")
+            print(f"  Cache read:          {usage['cache_read_input_tokens']:,}")
+            print(f"  Cache write:         {usage['cache_creation_input_tokens']:,}")
+            if usage.get('thinking_tokens'):
+                print(f"  Thinking tokens:     {usage['thinking_tokens']:,}")
+            print(f"  Turns:               {usage['turns']}")
+            print(f"  Est. cost (list $):  ${cost['total']:.4f}  "
+                  f"(in ${cost['input']:.4f} / out ${cost['output']:.4f} / "
+                  f"cache_r ${cost['cache_read']:.4f} / cache_w ${cost['cache_write']:.4f})")
+            print("  (List prices — actual cost may differ on Max/Team plans)")
+        else:
+            print("  No Claude Code session data found in ~/.claude/projects/")
     except Exception as exc:
-        print(f"Budget estimate unavailable: {exc}")
+        print(f"Budget unavailable: {exc}")
 
 
 def cmd_dashboard(proj):
@@ -378,16 +397,59 @@ def find_local_git_repos(max_depth: int = 5) -> list:
     home = Path.home()
     found_paths = _scan_for_git_dirs(home, max_depth)
 
-    repos = []
+    # Build full list then deduplicate by remote URL
+    raw = []
     for path in sorted(found_paths, key=lambda p: Path(p).name.lower()):
         remote = _get_remote_url(path)
-        repos.append({
+        raw.append({
             'path': path,
             'name': Path(path).name,
             'has_plugin': (Path(path) / '.ai').exists(),
             'remote': remote,
         })
-    return repos
+
+    return _dedup_repos(raw)
+
+
+def _dedup_repos(repos: list) -> list:
+    """
+    When multiple local clones share the same remote URL, keep the best one:
+    prefer paths with the plugin installed, then most recently modified.
+    Annotates with 'copies' count so the UI can say '(+2 copies)'.
+    """
+    from collections import defaultdict
+    by_remote: dict = defaultdict(list)
+    no_remote = []
+
+    for r in repos:
+        if r['remote']:
+            by_remote[r['remote']].append(r)
+        else:
+            no_remote.append(r)
+
+    deduped = []
+    for remote, group in by_remote.items():
+        if len(group) == 1:
+            group[0]['copies'] = 0
+            deduped.append(group[0])
+        else:
+            # Prefer plugin-installed, then newest mtime
+            def _score(r):
+                has_plugin = 1 if r['has_plugin'] else 0
+                try:
+                    mtime = Path(r['path']).stat().st_mtime
+                except Exception:
+                    mtime = 0
+                return (has_plugin, mtime)
+            best = max(group, key=_score)
+            best['copies'] = len(group) - 1
+            deduped.append(best)
+
+    for r in no_remote:
+        r['copies'] = 0
+    deduped.extend(no_remote)
+
+    return sorted(deduped, key=lambda r: r['name'].lower())
 
 
 def _scan_for_git_dirs(root: Path, max_depth: int) -> set:
@@ -479,8 +541,9 @@ def print_repo_list_and_pick(repos: list) -> None:
             all_ordered.append(r)
             ci   = '[ci]' if r['has_plugin'] else '    '
             name = r['name']
+            copies = f"  (+{r['copies']} copies)" if r.get('copies') else ''
             remote_hint = f"  ({r['remote']})" if r['remote'] else ''
-            print(f"  {i}) {ci}  {name}  —  {r['path']}{remote_hint}")
+            print(f"  {i}) {ci}  {name}  —  {r['path']}{copies}{remote_hint}")
         print()
 
     _print_group(with_remote, "  Connected to a remote:\n")
