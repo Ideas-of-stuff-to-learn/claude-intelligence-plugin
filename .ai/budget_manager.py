@@ -11,10 +11,13 @@ authenticated API; this module stores only local budget observations.
 Usage:
   from budget_manager import create_budget, allocate, consume, get_status, preflight_estimate
 """
-import sqlite3, json, os, sys, uuid
+import sqlite3
+import os
+import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, NamedTuple
+from typing import Any, Dict, Optional, NamedTuple
 
 _TABLES_SQL = """
 PRAGMA journal_mode=WAL;

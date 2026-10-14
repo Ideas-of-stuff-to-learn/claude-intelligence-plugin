@@ -4,8 +4,9 @@ Prints context into the AI session (injected as system context by Claude Code).
 Also auto-rebuilds knowledge.db if stale or missing.
 Fails open: any internal error prints a warning and exits 0.
 """
-import sys, os, subprocess
-from datetime import datetime
+import sys
+import os
+import subprocess
 
 def read_section(path, heading):
     """Read lines from a heading until the next same-level heading or end of file."""
@@ -110,7 +111,8 @@ def main():
 
         # Log session.started event (fail open)
         try:
-            import importlib.util, pathlib
+            import importlib.util
+            import pathlib
             _spec = importlib.util.spec_from_file_location(
                 "event_logger",
                 pathlib.Path(proj) / ".ai" / "event_logger.py"

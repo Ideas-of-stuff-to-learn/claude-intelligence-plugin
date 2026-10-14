@@ -5,11 +5,9 @@ Run with: pytest tests/test_hooks.py -v
 import json
 import os
 import sys
-import tempfile
 import subprocess
 from pathlib import Path
 from datetime import date
-import pytest
 
 REPO = Path(__file__).parent.parent
 HOOKS = REPO / 'hooks'

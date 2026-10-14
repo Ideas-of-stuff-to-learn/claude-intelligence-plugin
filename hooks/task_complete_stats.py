@@ -13,7 +13,9 @@ base_ref defaults to HEAD~1 (last commit). Pass a commit hash to compare further
 CUSTOMISE: Edit IMPORTANT_PATTERNS below to match your project's critical files.
 Fails open — always exits 0.
 """
-import sys, os, subprocess
+import sys
+import os
+import subprocess
 
 # Override these patterns to match your project's critical files.
 # Each entry: (label, [path fragments to match against changed file paths])
@@ -121,7 +123,7 @@ def main():
             print(f"  … and {len(changed_files) - 10} more")
     print()
     if stat_output:
-        summary_line = [l for l in stat_output.splitlines() if "changed" in l]
+        summary_line = [line for line in stat_output.splitlines() if "changed" in line]
         if summary_line:
             print(f"Git diff:        {summary_line[-1].strip()}")
     if flags:

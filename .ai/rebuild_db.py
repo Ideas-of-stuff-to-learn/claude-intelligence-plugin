@@ -5,7 +5,11 @@ Usage: python .ai/rebuild_db.py [project_dir]
 Builds .ai/knowledge.db from scratch with versioned schema.
 Safe: never destroys the last valid DB on failure.
 """
-import sqlite3, os, sys, json, hashlib, re
+import sqlite3
+import os
+import sys
+import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -117,7 +121,7 @@ def index_context_docs(conn, proj):
             text = md_file.read_text(encoding='utf-8', errors='replace')
         except Exception:
             text = ''
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
         description = lines[1] if len(lines) > 1 else lines[0] if lines else ''
         tags = md_file.stem
         conn.execute("""
@@ -192,7 +196,7 @@ def set_project_config(conn, proj):
 def main():
     proj = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('CLAUDE_PROJECT_DIR', os.getcwd())
     ai_dir = Path(proj) / '.ai'
-    ai_dir.mkdir(exist_ok=True)
+    ai_dir.mkdir(parents=True, exist_ok=True)
 
     db_path = ai_dir / 'knowledge.db'
     tmp_path = ai_dir / 'knowledge.db.tmp'

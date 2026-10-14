@@ -5,7 +5,12 @@ Serves on localhost:7654 by default (configurable via --port).
 Usage:
   python .ai/dashboard_server.py [--port 7654] [project_dir]
 """
-import sqlite3, json, os, sys, argparse, subprocess
+import sqlite3
+import json
+import os
+import sys
+import argparse
+import subprocess
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -499,7 +504,7 @@ CREATE TABLE IF NOT EXISTS analysis_passes (
 
 def _api_tests(project_dir: str) -> Dict[str, Any]:
     ran_at = datetime.now(timezone.utc).isoformat()
-    tests_dir = Path(project_dir) / "tests"
+    Path(project_dir) / "tests"
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", "tests/", "--tb=short", "-q"],

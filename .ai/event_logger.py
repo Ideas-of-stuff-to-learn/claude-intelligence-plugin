@@ -6,7 +6,11 @@ Usage:
   log_event("task.created", "agent", "active", metadata={"title": "..."}, project_dir="/path")
 Never crashes the caller — all errors are suppressed.
 """
-import sqlite3, json, os, sys, uuid
+import sqlite3
+import json
+import os
+import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional

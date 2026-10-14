@@ -78,7 +78,9 @@ jobs:
           python-version: "3.12"
 
       - name: Run rebuild_db.py
-        run: python .ai/rebuild_db.py /tmp/smoke-test-proj
+        run: |
+          mkdir -p /tmp/smoke-test-proj
+          python .ai/rebuild_db.py /tmp/smoke-test-proj
 
       - name: Run sync_context.py (no context dir)
         run: python .ai/sync_context.py /tmp/smoke-test-proj

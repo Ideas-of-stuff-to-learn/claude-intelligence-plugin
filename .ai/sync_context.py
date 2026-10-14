@@ -4,7 +4,10 @@ sync_context.py — Incremental sync of context/*.md into knowledge.db.
 Usage: python .ai/sync_context.py [project_dir]
 Only updates rows for files that changed since last index. Safe: never destroys DB.
 """
-import sqlite3, os, sys, hashlib
+import sqlite3
+import os
+import sys
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -53,7 +56,7 @@ def main():
                 text = md_file.read_text(encoding='utf-8', errors='replace')
             except Exception:
                 text = ''
-            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
             description = lines[1] if len(lines) > 1 else (lines[0] if lines else '')
             conn.execute("""
                 INSERT OR REPLACE INTO files (path, description, tags, content_hash, indexed_at, is_context_doc)

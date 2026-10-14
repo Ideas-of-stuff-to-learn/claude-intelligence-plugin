@@ -6,7 +6,6 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-import pytest
 
 REPO = Path(__file__).parent.parent
 REBUILD_DB = REPO / '.ai' / 'rebuild_db.py'
@@ -100,7 +99,7 @@ class TestRebuildDb:
         # First successful build
         run_script(REBUILD_DB, tmp_path)
         db = tmp_path / '.ai' / 'knowledge.db'
-        original_mtime = db.stat().st_mtime
+        db.stat().st_mtime
 
         # Point script at a non-writable .ai dir to force failure
         # (We can't easily force mid-run failure, but we can verify .tmp is cleaned up)

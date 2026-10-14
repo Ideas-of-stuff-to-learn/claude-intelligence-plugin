@@ -5,7 +5,10 @@ Blocks session end if:
   2. Source files were edited but /verifier has not been run since the last edit
 Fails open on all internal errors.
 """
-import sys, json, os, subprocess
+import sys
+import json
+import os
+import subprocess
 
 def main():
     try:
@@ -45,7 +48,7 @@ def main():
             sys.exit(0)
 
         # Check if handoff.md was updated this session
-        handoff_path = os.path.join(proj, "context", "handoff.md")
+        os.path.join(proj, "context", "handoff.md")
         handoff_in_git = subprocess.run(
             ["git", "diff", "--name-only", "HEAD", "--", "context/handoff.md"],
             capture_output=True, text=True, cwd=proj

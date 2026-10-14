@@ -5,7 +5,11 @@ PostToolUse hook (Edit|Write matcher) — context_sync.py
 - Records current HEAD hash to .claude/.last_edit_hash
 Fails open on all internal errors.
 """
-import sys, json, os, subprocess, shutil
+import sys
+import json
+import os
+import subprocess
+import shutil
 
 def main():
     try:
@@ -64,7 +68,8 @@ def main():
 
         # Log hook.fired event (fail open)
         try:
-            import importlib.util, pathlib
+            import importlib.util
+            import pathlib
             _spec = importlib.util.spec_from_file_location(
                 "event_logger",
                 pathlib.Path(proj) / ".ai" / "event_logger.py"

@@ -14,9 +14,11 @@ Usage:
   python .ai/intelligence_cli.py dashboard
   python .ai/intelligence_cli.py log-event <type> <component> <status>
 """
-import sys, os, sqlite3, json, subprocess
+import sys
+import os
+import sqlite3
+import json
 from pathlib import Path
-from datetime import datetime
 
 
 def get_proj():

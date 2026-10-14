@@ -1,9 +1,12 @@
 """Tests for analyze_repo.py and analysis-related DB/API functions."""
-import importlib.util, json, os, sys, tempfile, threading, time
+import importlib.util
+import json
+import sys
+import threading
+import time
 from pathlib import Path
 from http.server import HTTPServer
 
-import pytest
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,11 @@
 analyze_repo.py — Scan a project and record analysis passes.
 Usage: python .ai/analyze_repo.py [project_dir]
 """
-import os, json, sqlite3, sys, time, subprocess
+import os
+import json
+import sqlite3
+import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -443,7 +447,7 @@ def main() -> None:
     for lens in summary['lenses_run']:
         print(f"  [{lens}] done")
 
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Files discovered: {summary['files_discovered']}")
     print(f"  Lenses run: {', '.join(summary['lenses_run'])}")
     if 'semantic' in summary['results']:

@@ -3,7 +3,9 @@ PreToolUse hook (Edit|Write matcher) — safe_point_guard.py
 Blocks source code edits until a safe-point has been recorded for today.
 Fails open: any internal error exits 0 (warning only, never locks the owner out).
 """
-import sys, json, os, re
+import sys
+import json
+import os
 from datetime import date
 
 def main():

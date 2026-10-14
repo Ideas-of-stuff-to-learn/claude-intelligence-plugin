@@ -2,16 +2,21 @@
 tests/test_telemetry.py — Tests for event_logger, budget_manager, dashboard_server.
 Requires: Python stdlib only, pytest.
 """
-import json, os, sys, sqlite3, tempfile, threading, time, urllib.request
+import json
+import sys
+import sqlite3
+import threading
+import time
+import urllib.request
 from pathlib import Path
 
 # Ensure .ai/ is importable
 _AI_DIR = Path(__file__).parent.parent / ".ai"
 sys.path.insert(0, str(_AI_DIR))
 
-import event_logger
-import budget_manager
-import dashboard_server
+import event_logger  # noqa: E402
+import budget_manager  # noqa: E402
+import dashboard_server  # noqa: E402
 
 
 # ──────────────────────────────────────────────────────────────
@@ -120,7 +125,7 @@ def test_event_logger_tables_created(tmp_path):
 
 def test_event_logger_fails_open_on_bad_path(tmp_path):
     # Should not raise even with a bad project_dir
-    result = event_logger.log_event(
+    event_logger.log_event(
         "session.started", "test", "active",
         project_dir="/nonexistent/__bad__/path",
     )

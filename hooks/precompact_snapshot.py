@@ -6,7 +6,9 @@ Before context window summarisation, writes a full session snapshot to:
 Then syncs SQLite.
 Fails open on all errors.
 """
-import sys, json, os, subprocess
+import sys
+import os
+import subprocess
 from datetime import datetime
 
 def get_git_head(proj):

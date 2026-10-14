@@ -5,7 +5,6 @@ Run with: pytest tests/test_cli.py -v
 import subprocess
 import sys
 from pathlib import Path
-import pytest
 
 REPO = Path(__file__).parent.parent
 CLI = REPO / '.ai' / 'intelligence_cli.py'
