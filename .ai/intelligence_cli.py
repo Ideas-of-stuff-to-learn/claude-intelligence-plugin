@@ -369,37 +369,17 @@ def cmd_install(project_dir: str) -> None:
 # setup-alias command
 # ---------------------------------------------------------------------------
 
-def find_local_git_repos(max_depth: int = 4) -> list:
-    """Scan common locations for git repos. Returns list of dicts with path + metadata."""
+def find_local_git_repos(max_depth: int = 5) -> list:
+    """Scan for git repos efficiently.
+
+    Uses 'find' (C, parallel I/O) on Unix/Mac; falls back to os.scandir()
+    with in-place dir pruning (avoids extra stat calls vs Path.iterdir).
+    """
     home = Path.home()
-    search_roots = [home]
-    for name in ('projects', 'work', 'code', 'dev', 'src', 'repos', 'git',
-                 'workspace', 'Sites', 'Developer', 'Documents'):
-        candidate = home / name
-        if candidate.is_dir():
-            search_roots.append(candidate)
-
-    found = set()
-
-    def walk(path: Path, depth: int):
-        if depth == 0:
-            return
-        try:
-            for entry in path.iterdir():
-                if not entry.is_dir() or entry.name.startswith('.'):
-                    continue
-                if (entry / '.git').exists():
-                    found.add(str(entry.resolve()))
-                else:
-                    walk(entry, depth - 1)
-        except PermissionError:
-            pass
-
-    for root in search_roots:
-        walk(root, max_depth)
+    found_paths = _scan_for_git_dirs(home, max_depth)
 
     repos = []
-    for path in sorted(found, key=lambda p: Path(p).name.lower()):
+    for path in sorted(found_paths, key=lambda p: Path(p).name.lower()):
         remote = _get_remote_url(path)
         repos.append({
             'path': path,
@@ -408,6 +388,66 @@ def find_local_git_repos(max_depth: int = 4) -> list:
             'remote': remote,
         })
     return repos
+
+
+def _scan_for_git_dirs(root: Path, max_depth: int) -> set:
+    """Return set of repo root paths. Tries 'find' first, falls back to scandir."""
+    import subprocess as _sp
+
+    # --- fast path: let the OS do it with find (Unix/Mac/WSL/Git Bash) ---
+    try:
+        result = _sp.run(
+            ['find', str(root), '-maxdepth', str(max_depth),
+             '-name', '.git', '-type', 'd', '-prune'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            repos = set()
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.endswith('/.git'):
+                    repos.add(line[:-5])   # strip /.git
+            if repos:
+                return repos
+    except (FileNotFoundError, Exception):
+        pass  # 'find' not available (Windows CMD) — fall through
+
+    # --- fallback: os.scandir with pruning, no extra stat() calls ---
+    return _scandir_walk(str(root), max_depth)
+
+
+def _scandir_walk(root: str, max_depth: int) -> set:
+    """Efficient scandir-based walker. Prunes .git, hidden, and irrelevant dirs."""
+    _SKIP = frozenset({
+        'node_modules', '__pycache__', '.venv', 'venv', 'env',
+        'dist', 'build', 'target', '.cache', 'vendor',
+    })
+    found = set()
+    # Stack entries: (path_str, depth_remaining)
+    stack = [(root, max_depth)]
+    while stack:
+        current, depth = stack.pop()
+        if depth == 0:
+            continue
+        try:
+            with os.scandir(current) as it:
+                subdirs = []
+                has_git = False
+                for entry in it:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    if entry.name == '.git':
+                        has_git = True
+                    elif not entry.name.startswith('.') and entry.name not in _SKIP:
+                        subdirs.append(entry.path)
+                if has_git:
+                    found.add(current)
+                    # Don't descend into a repo's subdirs
+                else:
+                    stack.extend((p, depth - 1) for p in subdirs)
+        except PermissionError:
+            pass
+    return found
 
 
 def _get_remote_url(path: str) -> str:
