@@ -25,6 +25,35 @@ VALID_EVENT_TYPES = {
     "resource.allocated", "resource.observed",
 }
 
+_ANALYSIS_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS first_encounter (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recorded_at TEXT NOT NULL,
+    project_id TEXT,
+    files_discovered INTEGER,
+    files_indexed INTEGER,
+    structure_summary TEXT,
+    semantic_summary TEXT,
+    constraints_found INTEGER,
+    decisions_found INTEGER,
+    known_problems_found INTEGER,
+    hook_events_wired INTEGER,
+    schema_version INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS analysis_passes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    passed_at TEXT NOT NULL,
+    project_id TEXT,
+    trigger TEXT,
+    lens TEXT NOT NULL,
+    findings TEXT,
+    files_examined INTEGER,
+    duration_ms INTEGER,
+    schema_version INTEGER DEFAULT 1
+);
+"""
+
 _TABLES_SQL = """
 PRAGMA journal_mode=WAL;
 
@@ -203,8 +232,161 @@ def ensure_tables(project_dir: Optional[str] = None) -> bool:
     conn = _open_conn(project_dir)
     if conn is None:
         return False
+    try:
+        conn.executescript(_ANALYSIS_TABLES_SQL)
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
     return True
+
+
+def record_first_encounter(
+    project_dir: Optional[str],
+    structure_summary: Dict[str, Any],
+    semantic_summary: Dict[str, Any],
+    stats: Dict[str, Any],
+) -> bool:
+    """Write one first_encounter row; idempotent (only inserts if none for this project_id)."""
+    try:
+        conn = _open_conn(project_dir)
+        if conn is None:
+            return False
+        conn.executescript(_ANALYSIS_TABLES_SQL)
+        pid = _get_project_id(project_dir)
+        try:
+            existing = conn.execute(
+                "SELECT id FROM first_encounter WHERE project_id=? LIMIT 1", (pid,)
+            ).fetchone()
+            if existing:
+                return True
+            ts = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """INSERT INTO first_encounter
+                   (recorded_at, project_id, files_discovered, files_indexed,
+                    structure_summary, semantic_summary,
+                    constraints_found, decisions_found, known_problems_found,
+                    hook_events_wired, schema_version)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                (
+                    ts, pid,
+                    stats.get('files_discovered', 0),
+                    stats.get('files_indexed', 0),
+                    json.dumps(structure_summary),
+                    json.dumps(semantic_summary),
+                    stats.get('constraints_found', 0),
+                    stats.get('decisions_found', 0),
+                    stats.get('known_problems_found', 0),
+                    stats.get('hook_events_wired', 0),
+                )
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+def record_analysis_pass(
+    project_dir: Optional[str],
+    trigger: str,
+    lens: str,
+    findings: Dict[str, Any],
+    files_examined: int,
+    duration_ms: int,
+) -> bool:
+    """Append a row to analysis_passes."""
+    try:
+        conn = _open_conn(project_dir)
+        if conn is None:
+            return False
+        conn.executescript(_ANALYSIS_TABLES_SQL)
+        pid = _get_project_id(project_dir)
+        ts = datetime.now(timezone.utc).isoformat()
+        try:
+            conn.execute(
+                """INSERT INTO analysis_passes
+                   (passed_at, project_id, trigger, lens, findings,
+                    files_examined, duration_ms, schema_version)
+                   VALUES (?,?,?,?,?,?,?,1)""",
+                (ts, pid, trigger, lens, json.dumps(findings), files_examined, duration_ms)
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+def get_first_encounter(project_dir: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Return first_encounter row as dict or None."""
+    try:
+        conn = _open_conn(project_dir)
+        if conn is None:
+            return None
+        conn.executescript(_ANALYSIS_TABLES_SQL)
+        pid = _get_project_id(project_dir)
+        try:
+            row = conn.execute(
+                "SELECT * FROM first_encounter WHERE project_id=? LIMIT 1", (pid,)
+            ).fetchone()
+            if row is None:
+                return None
+            d = dict(row)
+            for key in ('structure_summary', 'semantic_summary'):
+                if d.get(key):
+                    try:
+                        d[key] = json.loads(d[key])
+                    except Exception:
+                        pass
+            return d
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def get_analysis_passes(
+    project_dir: Optional[str] = None,
+    lens: Optional[str] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """Return list of analysis_passes rows, optionally filtered by lens."""
+    try:
+        conn = _open_conn(project_dir)
+        if conn is None:
+            return []
+        conn.executescript(_ANALYSIS_TABLES_SQL)
+        pid = _get_project_id(project_dir)
+        try:
+            if lens:
+                rows = conn.execute(
+                    "SELECT * FROM analysis_passes WHERE project_id=? AND lens=? "
+                    "ORDER BY passed_at DESC LIMIT ?",
+                    (pid, lens, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM analysis_passes WHERE project_id=? "
+                    "ORDER BY passed_at DESC LIMIT ?",
+                    (pid, limit)
+                ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                if d.get('findings'):
+                    try:
+                        d['findings'] = json.loads(d['findings'])
+                    except Exception:
+                        pass
+                result.append(d)
+            return result
+        finally:
+            conn.close()
+    except Exception:
+        return []
 
 
 if __name__ == "__main__":

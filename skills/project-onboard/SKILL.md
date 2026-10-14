@@ -62,6 +62,15 @@ python .ai/intelligence_cli.py health
 
 Run `/safe-point` to record the clean initial state before any changes.
 
+### Phase 6 — Record first encounter
+
+After the initial rebuild, run:
+```bash
+python .ai/analyze_repo.py
+```
+
+This records the first-encounter snapshot and all three analysis lenses to the DB. The dashboard First Encounter tab will then show what the system found.
+
 ## Verification
 
 After onboarding, `python .ai/intelligence_cli.py health` should report no critical issues.

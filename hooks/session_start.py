@@ -122,6 +122,14 @@ def main():
         except Exception:
             pass
 
+        # Run structural + exact analysis passes (fail open)
+        try:
+            sys.path.insert(0, os.path.join(proj, '.ai'))
+            from analyze_repo import run_analysis
+            run_analysis(proj, trigger='session_start', lenses=['structural', 'exact'])
+        except Exception:
+            pass
+
     except Exception as e:
         print(f"[session_start] warning: {e}", file=sys.stderr)
         sys.exit(0)
