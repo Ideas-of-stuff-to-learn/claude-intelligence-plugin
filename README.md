@@ -23,31 +23,21 @@ Lovable, and any generic AI agent.
 
 ---
 
-## Quick Start
+## Installation
 
-### 1. Install into a project (Claude Code)
+See [INSTALL.md](INSTALL.md) for the one-line install.
 
+Quick start:
 ```bash
-# Copy hooks to your project's .claude/hooks/
-cp hooks/*.py /your-project/.claude/hooks/
-cp templates/settings.json /your-project/.claude/settings.json
-
-# Copy .ai/ scripts
-cp -r .ai/ /your-project/.ai/
-
-# Scaffold context documents
-mkdir -p /your-project/context
-cp templates/context/*.md /your-project/context/
-
-# Build the knowledge base
-cd /your-project
-python .ai/rebuild_db.py
-
-# Verify the install
-python .ai/intelligence_cli.py health
+# Mac/Linux/WSL/Git Bash
+curl -fsSL https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.sh | sh
+# then restart terminal, then:
+ci install
 ```
 
-### 2. First session
+## Quick Start
+
+### 1. First session
 
 Run `/project-onboard` (or `/catch-up` if context docs already exist).
 

@@ -13,11 +13,16 @@ Usage:
   python .ai/intelligence_cli.py budget <task_description>
   python .ai/intelligence_cli.py dashboard
   python .ai/intelligence_cli.py log-event <type> <component> <status>
+  python .ai/intelligence_cli.py install [project_dir]
+  python .ai/intelligence_cli.py setup-alias
 """
 import sys
 import os
 import sqlite3
 import json
+import hashlib
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -168,6 +173,238 @@ def cmd_dashboard(proj):
     print(f"Run: python {proj / '.ai' / 'dashboard_server.py'}")
 
 
+# ---------------------------------------------------------------------------
+# version_check
+# ---------------------------------------------------------------------------
+
+HOOK_FILES = [
+    'session_start.py',
+    'safe_point_guard.py',
+    'context_sync.py',
+    'check_handoff.py',
+    'precompact_snapshot.py',
+    'task_complete_stats.py',
+]
+
+AI_FILES = [
+    '.ai/rebuild_db.py',
+    '.ai/sync_context.py',
+    '.ai/intelligence_cli.py',
+    '.ai/event_logger.py',
+    '.ai/budget_manager.py',
+    '.ai/analyze_repo.py',
+    '.ai/registry.py',
+    '.ai/git_history.py',
+]
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def version_check(project_dir: str, plugin_dir: str) -> list:
+    """Check installed hook/ai files vs canonical versions in plugin_dir.
+
+    Returns list of dicts: {file, status ('current'|'outdated'|'missing'), action}
+    """
+    project_dir = Path(project_dir)
+    plugin_dir = Path(plugin_dir)
+    results = []
+
+    # Check hook files
+    hooks_src = plugin_dir / 'hooks'
+    hooks_dst = project_dir / '.claude' / 'hooks'
+    for fname in HOOK_FILES:
+        canonical = hooks_src / fname
+        installed = hooks_dst / fname
+        if not canonical.exists():
+            continue
+        if not installed.exists():
+            results.append({'file': f'.claude/hooks/{fname}', 'status': 'missing', 'action': 'copy'})
+        elif _sha256(canonical) != _sha256(installed):
+            results.append({'file': f'.claude/hooks/{fname}', 'status': 'outdated', 'action': 'update'})
+        else:
+            results.append({'file': f'.claude/hooks/{fname}', 'status': 'current', 'action': 'none'})
+
+    # Check .ai/ files
+    for rel in AI_FILES:
+        # canonical lives directly at plugin_dir/<rel>
+        canonical = plugin_dir / rel
+        installed = project_dir / rel
+        if not canonical.exists():
+            continue
+        if not installed.exists():
+            results.append({'file': rel, 'status': 'missing', 'action': 'copy'})
+        elif _sha256(canonical) != _sha256(installed):
+            results.append({'file': rel, 'status': 'outdated', 'action': 'update'})
+        else:
+            results.append({'file': rel, 'status': 'current', 'action': 'none'})
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# install command
+# ---------------------------------------------------------------------------
+
+def cmd_install(project_dir: str) -> None:
+    """Install or upgrade the intelligence system in a repo."""
+    project_dir = Path(project_dir)
+    # plugin_dir is the parent of the .ai/ directory containing this script
+    plugin_dir = Path(__file__).resolve().parent.parent
+
+    print(f"Installing claude-intel in: {project_dir}")
+
+    checks = version_check(str(project_dir), str(plugin_dir))
+
+    patched_hooks = 0
+    added_ai = 0
+    for item in checks:
+        if item['status'] in ('outdated', 'missing'):
+            src_rel = item['file']
+            dst = project_dir / src_rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            # Hook files: canonical source is plugin_dir/hooks/<fname>
+            # AI files: canonical source is plugin_dir/<rel>
+            if '.claude/hooks/' in src_rel:
+                fname = Path(src_rel).name
+                src = plugin_dir / 'hooks' / fname
+            else:
+                src = plugin_dir / src_rel
+            if not src.exists():
+                continue
+            shutil.copy2(str(src), str(dst))
+            if '.claude/hooks/' in src_rel:
+                patched_hooks += 1
+            else:
+                added_ai += 1
+
+    if patched_hooks:
+        print(f"✓ Patched/added {patched_hooks} hook file(s)")
+    if added_ai:
+        print(f"✓ Patched/added {added_ai} .ai file(s)")
+
+    # Copy context templates only if context/ dir already exists
+    ctx_dst = project_dir / 'context'
+    ctx_src = plugin_dir / 'templates' / 'context'
+    if ctx_dst.exists() and ctx_src.exists():
+        added_ctx = 0
+        for tmpl in ctx_src.glob('*.md'):
+            dest = ctx_dst / tmpl.name
+            if not dest.exists():
+                shutil.copy2(str(tmpl), str(dest))
+                added_ctx += 1
+        if added_ctx:
+            print(f"✓ Added {added_ctx} missing context templates")
+
+    # Rebuild DB
+    rebuild_script = project_dir / '.ai' / 'rebuild_db.py'
+    file_count = 0
+    if rebuild_script.exists():
+        try:
+            result = subprocess.run(
+                [sys.executable, '-I', str(rebuild_script), str(project_dir)],
+                capture_output=True, text=True, timeout=120
+            )
+            # Try to parse file count from output
+            for line in (result.stdout + result.stderr).splitlines():
+                if 'file' in line.lower():
+                    import re
+                    m = re.search(r'(\d+)\s+file', line)
+                    if m:
+                        file_count = int(m.group(1))
+                        break
+            print(f"✓ Index rebuilt ({file_count} files)")
+        except Exception as exc:
+            print(f"  (rebuild skipped: {exc})")
+    else:
+        print("  (rebuild_db.py not found, skipping index rebuild)")
+
+    # Run analyze_repo
+    analyze_script = project_dir / '.ai' / 'analyze_repo.py'
+    if analyze_script.exists():
+        try:
+            subprocess.run(
+                [sys.executable, '-I', str(analyze_script), str(project_dir)],
+                capture_output=True, text=True, timeout=120
+            )
+            print("✓ Analysis complete (semantic, structural, exact)")
+        except Exception as exc:
+            print(f"  (analysis skipped: {exc})")
+    else:
+        print("  (analyze_repo.py not found, skipping analysis)")
+
+    # Register project
+    reg_script = project_dir / '.ai' / 'registry.py'
+    if reg_script.exists():
+        try:
+            sys.path.insert(0, str(project_dir / '.ai'))
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('registry', str(reg_script))
+            reg_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(reg_mod)
+            if hasattr(reg_mod, 'register_project'):
+                reg_mod.register_project(str(project_dir))
+            print("✓ Registered in global registry")
+        except Exception as exc:
+            print(f"  (registry skipped: {exc})")
+
+    print("")
+    print("Done. Run: ci status")
+
+
+# ---------------------------------------------------------------------------
+# setup-alias command
+# ---------------------------------------------------------------------------
+
+def cmd_setup_alias(plugin_dir: str) -> None:
+    """Detect shell and add plugin_dir to PATH in the appropriate rc file."""
+    plugin_dir = Path(plugin_dir)
+    home = Path.home()
+    shell_env = os.environ.get('SHELL', '')
+    shell_name = Path(shell_env).name if shell_env else ''
+
+    fish_config = home / '.config' / 'fish' / 'config.fish'
+    nu_config = home / '.config' / 'nushell' / 'config.nu'
+
+    if shell_name == 'zsh' or (home / '.zshrc').exists():
+        rc_file = home / '.zshrc'
+        path_line = f'export PATH="{plugin_dir}:$PATH"'
+    elif shell_name == 'bash' or (home / '.bashrc').exists():
+        rc_file = home / '.bashrc'
+        path_line = f'export PATH="{plugin_dir}:$PATH"'
+    elif shell_name == 'fish' or fish_config.exists():
+        rc_file = fish_config
+        path_line = f'set -gx PATH {plugin_dir} $PATH'
+    elif shell_name in ('nu', 'nushell') or nu_config.exists():
+        rc_file = nu_config
+        path_line = f'$env.PATH = ($env.PATH | prepend {plugin_dir})'
+    elif shell_name in ('tcsh', 'csh'):
+        rc_file = home / '.tcshrc' if (home / '.tcshrc').exists() else home / '.cshrc'
+        path_line = f'setenv PATH "{plugin_dir}:$PATH"'
+    elif shell_name in ('dash', 'sh'):
+        rc_file = home / '.profile'
+        path_line = f'export PATH="{plugin_dir}:$PATH"'
+    else:
+        print("Could not detect shell rc file.")
+        print("Add this line to your shell config manually:")
+        print(f'  export PATH="{plugin_dir}:$PATH"')
+        return
+
+    rc_file.parent.mkdir(parents=True, exist_ok=True)
+    existing = rc_file.read_text() if rc_file.exists() else ''
+    if str(plugin_dir) in existing or '.claude-intel' in existing:
+        print(f"✓ PATH already set in {rc_file} (skipping)")
+    else:
+        with open(rc_file, 'a') as f:
+            f.write(f'\n# Claude Intelligence CLI\n{path_line}\n')
+        print(f"✓ Added to PATH in {rc_file}")
+
+    print("")
+    print("Restart your terminal, then run:")
+    print("  ci install")
+
+
 def cmd_log_event(proj, event_type, component, status):
     try:
         sys.path.insert(0, str(proj / '.ai'))
@@ -189,7 +426,8 @@ def main():
         sys.exit(0)
     cmd = args[0]
     if cmd == 'status':
-        cmd_status(proj)
+        project_dir = args[1] if len(args) > 1 else str(proj)
+        cmd_status(Path(project_dir))
     elif cmd == 'search' and len(args) > 1:
         cmd_search(proj, args[1])
     elif cmd == 'deps' and len(args) > 1:
@@ -207,15 +445,24 @@ def main():
         else:
             print("ERROR: sync_context.py not found")
     elif cmd == 'health':
-        cmd_health(proj)
+        project_dir = args[1] if len(args) > 1 else str(proj)
+        cmd_health(Path(project_dir))
     elif cmd == 'events':
-        cmd_events(proj)
+        project_dir = args[1] if len(args) > 1 else str(proj)
+        cmd_events(Path(project_dir))
     elif cmd == 'budget' and len(args) > 1:
         cmd_budget(proj, ' '.join(args[1:]))
     elif cmd == 'dashboard':
-        cmd_dashboard(proj)
+        project_dir = args[1] if len(args) > 1 else str(proj)
+        cmd_dashboard(Path(project_dir))
     elif cmd == 'log-event' and len(args) >= 4:
         cmd_log_event(proj, args[1], args[2], args[3])
+    elif cmd == 'install':
+        project_dir = args[1] if len(args) > 1 else str(proj)
+        cmd_install(project_dir)
+    elif cmd == 'setup-alias':
+        plugin_dir = str(Path(__file__).resolve().parent.parent)
+        cmd_setup_alias(plugin_dir)
     else:
         print(f"Unknown command: {cmd}")
         print(__doc__)
