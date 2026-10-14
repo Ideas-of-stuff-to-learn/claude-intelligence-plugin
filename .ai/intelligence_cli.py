@@ -488,6 +488,9 @@ def print_repo_list_and_pick(repos: list) -> None:
 
     print("  [ci] = claude intelligence plugin installed\n")
 
+    if not sys.stdin.isatty():
+        return  # non-interactive — just print the list, no prompt
+
     try:
         choice = input("Enter number to print cd command (or Enter to skip): ").strip()
     except (EOFError, KeyboardInterrupt):

@@ -80,6 +80,7 @@ jobs:
       - name: Run rebuild_db.py
         run: |
           mkdir -p /tmp/smoke-test-proj
+          git init /tmp/smoke-test-proj
           python .ai/rebuild_db.py /tmp/smoke-test-proj
 
       - name: Run sync_context.py (no context dir)
