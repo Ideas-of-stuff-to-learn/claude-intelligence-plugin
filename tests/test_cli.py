@@ -16,6 +16,10 @@ def run_cli(args, proj_dir=None, env_extra=None):
     env = os.environ.copy()
     if proj_dir:
         env['CLAUDE_PROJECT_DIR'] = str(proj_dir)
+        # Ensure the temp dir looks like a git repo so the not-in-repo guard passes
+        git_dir = Path(proj_dir) / '.git'
+        if not git_dir.exists():
+            git_dir.mkdir()
     if env_extra:
         env.update(env_extra)
     result = subprocess.run(

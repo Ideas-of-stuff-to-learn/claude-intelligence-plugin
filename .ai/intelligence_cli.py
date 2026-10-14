@@ -369,6 +369,105 @@ def cmd_install(project_dir: str) -> None:
 # setup-alias command
 # ---------------------------------------------------------------------------
 
+def cmd_repos() -> None:
+    """List all registered repos and optionally cd into one."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from registry import list_projects
+        projects = list_projects()
+    except Exception:
+        projects = []
+
+    if not projects:
+        print("No repos registered yet. Run 'ci install' inside a repo to register it.")
+        return
+
+    print("Registered repos:\n")
+    for i, p in enumerate(projects, 1):
+        name = p.get('name', Path(p['path']).name)
+        path = p['path']
+        last = p.get('last_seen', '')[:10]
+        exists = '[OK]' if Path(path).exists() else '[missing]'
+        print(f"  {i}) {name}  {exists}  {path}  (last seen {last})")
+
+    print()
+    try:
+        choice = input("Enter number to print cd command (or Enter to skip): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+
+    if not choice:
+        return
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(projects):
+            path = projects[idx]['path']
+            # Print the cd command — the shell wrapper can eval it
+            print(f"\nRun this to navigate there:\n  cd \"{path}\"")
+        else:
+            print("Invalid selection.")
+    except ValueError:
+        print("Invalid input.")
+
+
+def is_in_repo(proj: Path) -> bool:
+    """Return True if proj is inside a git repo with the plugin installed."""
+    current = proj.resolve()
+    for directory in [current, *current.parents]:
+        if (directory / '.git').exists():
+            return True
+    return False
+
+
+REPO_REQUIRED_CMDS = {
+    'status', 'search', 'deps', 'rebuild', 'sync',
+    'health', 'events', 'budget', 'dashboard', 'log-event',
+}
+
+
+def not_in_repo_prompt(proj: Path) -> None:
+    """Warn the user they're not in a repo and offer registered repos."""
+    print(f"[ci] Not inside a git repo (checked from: {proj})")
+    print()
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from registry import list_projects
+        projects = list_projects()
+    except Exception:
+        projects = []
+
+    if not projects:
+        print("No registered repos found. Navigate to a repo and run 'ci install'.")
+        sys.exit(1)
+
+    print("Your registered repos:\n")
+    for i, p in enumerate(projects, 1):
+        name = p.get('name', Path(p['path']).name)
+        path = p['path']
+        exists = '[OK]' if Path(path).exists() else '[missing]'
+        print(f"  {i}) {name}  {exists}  {path}")
+
+    print()
+    try:
+        choice = input("Enter number to print cd command (or Enter to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(1)
+
+    if not choice:
+        sys.exit(1)
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(projects):
+            path = projects[idx]['path']
+            print(f"\nRun this to navigate there:\n  cd \"{path}\"")
+        else:
+            print("Invalid selection.")
+    except ValueError:
+        print("Invalid input.")
+    sys.exit(1)
+
+
 def cmd_setup_alias(plugin_dir: str) -> None:
     """Detect shell and add plugin_dir to PATH in the appropriate rc file."""
     plugin_dir = Path(plugin_dir)
@@ -436,6 +535,12 @@ def main():
     if not args:
         args = ['help']
     cmd = args[0]
+
+    # Guard: commands that need a repo context check we're actually in one
+    if cmd in REPO_REQUIRED_CMDS and not is_in_repo(proj):
+        not_in_repo_prompt(proj)
+        return
+
     if cmd == 'status':
         project_dir = args[1] if len(args) > 1 else str(proj)
         cmd_status(Path(project_dir))
@@ -475,6 +580,8 @@ def main():
     elif cmd == 'setup-alias':
         plugin_dir = str(Path(__file__).resolve().parent.parent)
         cmd_setup_alias(plugin_dir)
+    elif cmd in ('repos', 'projects'):
+        cmd_repos()
     elif cmd in ('help', '--help', '-h'):
         print("""ci — Claude Intelligence Plugin
 
@@ -491,6 +598,7 @@ COMMANDS
   dashboard        Start web dashboard at http://localhost:7654
   rebuild          Rebuild the SQLite index
   sync             Sync context markdown files into index
+  repos            List all registered repos (navigate to one)
   setup-alias      Add ci to PATH for your shell
   log-event <type> <component> <status>
   help             Show this message
