@@ -110,4 +110,4 @@ class TestCliUnknownCommand:
     def test_no_args_exits_zero_and_shows_help(self, tmp_path):
         rc, out, err = run_cli([], proj_dir=tmp_path)
         assert rc == 0
-        assert 'Usage' in out or 'intelligence_cli' in out
+        assert 'USAGE' in out or 'COMMANDS' in out
