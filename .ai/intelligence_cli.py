@@ -397,7 +397,6 @@ def find_local_git_repos(max_depth: int = 5) -> list:
     home = Path.home()
     found_paths = _scan_for_git_dirs(home, max_depth)
 
-    # Build full list then deduplicate by remote URL
     raw = []
     for path in sorted(found_paths, key=lambda p: Path(p).name.lower()):
         remote = _get_remote_url(path)
@@ -407,49 +406,7 @@ def find_local_git_repos(max_depth: int = 5) -> list:
             'has_plugin': (Path(path) / '.ai').exists(),
             'remote': remote,
         })
-
-    return _dedup_repos(raw)
-
-
-def _dedup_repos(repos: list) -> list:
-    """
-    When multiple local clones share the same remote URL, keep the best one:
-    prefer paths with the plugin installed, then most recently modified.
-    Annotates with 'copies' count so the UI can say '(+2 copies)'.
-    """
-    from collections import defaultdict
-    by_remote: dict = defaultdict(list)
-    no_remote = []
-
-    for r in repos:
-        if r['remote']:
-            by_remote[r['remote']].append(r)
-        else:
-            no_remote.append(r)
-
-    deduped = []
-    for remote, group in by_remote.items():
-        if len(group) == 1:
-            group[0]['copies'] = 0
-            deduped.append(group[0])
-        else:
-            # Prefer plugin-installed, then newest mtime
-            def _score(r):
-                has_plugin = 1 if r['has_plugin'] else 0
-                try:
-                    mtime = Path(r['path']).stat().st_mtime
-                except Exception:
-                    mtime = 0
-                return (has_plugin, mtime)
-            best = max(group, key=_score)
-            best['copies'] = len(group) - 1
-            deduped.append(best)
-
-    for r in no_remote:
-        r['copies'] = 0
-    deduped.extend(no_remote)
-
-    return sorted(deduped, key=lambda r: r['name'].lower())
+    return raw
 
 
 def _scan_for_git_dirs(root: Path, max_depth: int) -> set:
@@ -526,33 +483,57 @@ def _get_remote_url(path: str) -> str:
 
 
 def print_repo_list_and_pick(repos: list) -> None:
-    """Print repos grouped by remote/no-remote, offer a cd command."""
-    with_remote = [r for r in repos if r['remote']]
-    local_only  = [r for r in repos if not r['remote']]
+    """Print repos grouped by remote URL, with sub-entries for multi-copy remotes."""
+    from collections import defaultdict, OrderedDict
 
-    all_ordered = []
+    # Group by remote URL, preserving first-seen order
+    by_remote: dict = OrderedDict()
+    local_only = []
+    for r in repos:
+        if r['remote']:
+            by_remote.setdefault(r['remote'], []).append(r)
+        else:
+            local_only.append(r)
 
-    def _print_group(group, heading):
-        if not group:
-            return
-        print(heading)
-        for r in group:
+    # Each pickable entry maps a display number to a path
+    all_ordered = []  # list of paths in display order
+
+    def _ci(r):
+        return '[ci]' if r['has_plugin'] else '    '
+
+    if by_remote:
+        print("  Connected to a remote:\n")
+        for remote_url, group in by_remote.items():
+            name = group[0]['name']
+            if len(group) == 1:
+                r = group[0]
+                i = len(all_ordered) + 1
+                all_ordered.append(r['path'])
+                print(f"  {i}) {_ci(r)}  {name}")
+                print(f"          {remote_url}")
+                print(f"          {r['path']}")
+            else:
+                # Multiple local copies of the same remote
+                print(f"       {_ci(group[0])}  {name}  — multiple local copies")
+                print(f"          {remote_url}")
+                for r in group:
+                    i = len(all_ordered) + 1
+                    all_ordered.append(r['path'])
+                    print(f"          {i}) {_ci(r)}  {r['path']}")
+            print()
+
+    if local_only:
+        print("  Local only (no remote):\n")
+        for r in local_only:
             i = len(all_ordered) + 1
-            all_ordered.append(r)
-            ci   = '[ci]' if r['has_plugin'] else '    '
-            name = r['name']
-            copies = f"  (+{r['copies']} copies)" if r.get('copies') else ''
-            remote_hint = f"  ({r['remote']})" if r['remote'] else ''
-            print(f"  {i}) {ci}  {name}  —  {r['path']}{copies}{remote_hint}")
+            all_ordered.append(r['path'])
+            print(f"  {i}) {_ci(r)}  {r['name']}  —  {r['path']}")
         print()
-
-    _print_group(with_remote, "  Connected to a remote:\n")
-    _print_group(local_only,  "  Local only (no remote):\n")
 
     print("  [ci] = claude intelligence plugin installed\n")
 
     if not sys.stdin.isatty():
-        return  # non-interactive — just print the list, no prompt
+        return
 
     try:
         choice = input("Enter number to print cd command (or Enter to skip): ").strip()
@@ -565,7 +546,7 @@ def print_repo_list_and_pick(repos: list) -> None:
     try:
         idx = int(choice) - 1
         if 0 <= idx < len(all_ordered):
-            print(f"\n  cd \"{all_ordered[idx]['path']}\"")
+            print(f"\n  cd \"{all_ordered[idx]}\"")
         else:
             print("Invalid selection.")
     except ValueError:
