@@ -45,5 +45,4 @@ if ($current -notlike "*\.claude-intel*") {
 }
 
 Write-Host ""
-Write-Host "Then run:"
-Write-Host "  ci install"
+Write-Host "Restart your terminal, then run 'ci help' to see what you can do."

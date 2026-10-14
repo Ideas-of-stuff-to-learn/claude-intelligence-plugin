@@ -81,5 +81,4 @@ else
 fi
 
 echo ""
-echo "Restart your terminal, then run:"
-echo "  ci install"
+echo "Restart your terminal, then run 'ci help' to see what you can do."
