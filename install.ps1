@@ -1,5 +1,6 @@
 # Claude Intelligence Plugin installer for PowerShell
-# Usage: iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 | iex
+# Usage (PowerShell): Set-ExecutionPolicy Bypass -Scope Process -Force; iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing | iex
+# Usage (CMD):        powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing | iex"
 
 $ErrorActionPreference = "Stop"
 $RepoUrl = "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
