@@ -4,7 +4,7 @@
 
 | Terminal | Command |
 |---|---|
-| Mac · Linux · WSL · Git Bash · zsh · bash · fish · nushell | `curl -fsSL https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.sh \| sh` |
+| Mac · Linux · WSL · Git Bash · zsh · bash · fish · nushell | `curl -fsSL https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.sh` &#124; `sh` |
 | PowerShell (5 or 7) | `iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -OutFile install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1; Remove-Item install.ps1` |
 | CMD | `powershell -NoProfile -Command "iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -OutFile install.ps1" && powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 && del install.ps1` |
 
