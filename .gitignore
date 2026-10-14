@@ -1,6 +1,42 @@
+# Python
 __pycache__/
-*.py[cod]
-.env
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Intelligence system — local state, never committed
+.ai/knowledge.db
+.ai/knowledge.db.bak
+.ai/knowledge.db.tmp
+
+# Claude Code local session state
+.claude/settings.local.json
+.claude/**/*.local.*
+.claude/.last_edit_hash
+.claude/.last_verified
+.claude/.current_task_id
+
+# OS
 .DS_Store
 Thumbs.db
-desktop.ini
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage

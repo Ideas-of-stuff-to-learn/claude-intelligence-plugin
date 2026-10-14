@@ -69,15 +69,23 @@ def main():
         # Check if verifier has been run since last edit
         last_edit_hash = open(last_edit_path).read().strip()
         verified_path = os.path.join(proj, ".claude", ".last_verified")
-        if os.path.exists(verified_path):
-            last_verified = open(verified_path).read().strip()
-            if last_verified != last_edit_hash:
-                print(
-                    "Source files were edited but /verifier has not been run since the last edit.\n"
-                    "Run /verifier and confirm it passes before ending this session.",
-                    file=sys.stderr
-                )
-                sys.exit(2)
+        if not os.path.exists(verified_path):
+            # Edits were recorded but verifier was never run at all
+            print(
+                "Source files were edited but /verifier has not been run in this project.\n"
+                "Run /verifier and confirm it passes before ending this session.",
+                file=sys.stderr
+            )
+            sys.exit(2)
+
+        last_verified = open(verified_path).read().strip()
+        if last_verified != last_edit_hash:
+            print(
+                "Source files were edited but /verifier has not been run since the last edit.\n"
+                "Run /verifier and confirm it passes before ending this session.",
+                file=sys.stderr
+            )
+            sys.exit(2)
 
         sys.exit(0)
 

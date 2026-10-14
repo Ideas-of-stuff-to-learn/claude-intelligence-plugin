@@ -74,7 +74,7 @@ def main():
         if os.path.exists(snapshot_path):
             with open(snapshot_path, encoding="utf-8") as f:
                 snap = f.read().strip()
-            if snap and not snap.startswith("# Session Snapshot"):
+            if snap and snap.startswith("# Session Snapshot"):
                 print("\n## Session Snapshot (pre-compact)\n")
                 print(snap[:800])
 
@@ -107,6 +107,20 @@ def main():
         print("\n" + "=" * 60)
         print("Reminders: /safe-point before touching code | /verifier before marking complete | /handoff before ending session")
         print("=" * 60 + "\n")
+
+        # Log session.started event (fail open)
+        try:
+            import importlib.util, pathlib
+            _spec = importlib.util.spec_from_file_location(
+                "event_logger",
+                pathlib.Path(proj) / ".ai" / "event_logger.py"
+            )
+            if _spec and _spec.loader:
+                _mod = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                _mod.log_event("session.started", "session_start", "active", project_dir=proj)
+        except Exception:
+            pass
 
     except Exception as e:
         print(f"[session_start] warning: {e}", file=sys.stderr)

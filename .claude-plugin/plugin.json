@@ -1,10 +1,13 @@
 {
   "name": "claude-intelligence-plugin",
-  "version": "0.1.0",
-  "description": "Reusable skills, hooks, subagents and templates for Claude Code projects",
+  "version": "0.2.0",
+  "description": "Portable multi-platform engineering intelligence system — persistent knowledge, specialist subagents, lifecycle hooks, and verified task workflows for AI-assisted development.",
   "author": {
     "name": "Ideas-of-stuff-to-learn",
     "url": "https://github.com/Ideas-of-stuff-to-learn"
   },
-  "homepage": "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
+  "homepage": "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin",
+  "skills": ["skills/*/SKILL.md"],
+  "agents": ["agents/*.md"],
+  "hooks": "hooks/hooks.json"
 }

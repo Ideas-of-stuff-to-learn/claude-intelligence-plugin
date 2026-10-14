@@ -29,16 +29,54 @@ def main():
             subprocess.run(["ruff", "check", "--fix", "--quiet", file_path],
                            capture_output=True)
 
-        # Record that an edit happened this session
+        # Record working-tree state fingerprint (not commit hash — that misses uncommitted edits)
         last_edit_path = os.path.join(proj, ".claude", ".last_edit_hash")
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
+            import hashlib
+            result_unstaged = subprocess.run(
+                ["git", "diff", "--name-only"],
                 capture_output=True, text=True, cwd=proj
             )
-            if result.returncode == 0:
-                with open(last_edit_path, "w") as f:
-                    f.write(result.stdout.strip())
+            result_staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                capture_output=True, text=True, cwd=proj
+            )
+            result_untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                capture_output=True, text=True, cwd=proj
+            )
+            files = sorted(set(
+                result_unstaged.stdout.splitlines() +
+                result_staged.stdout.splitlines() +
+                result_untracked.stdout.splitlines()
+            ))
+            h = hashlib.sha256()
+            for f in files:
+                fpath = os.path.join(proj, f)
+                h.update(f.encode())
+                if os.path.exists(fpath):
+                    h.update(str(os.path.getmtime(fpath)).encode())
+            os.makedirs(os.path.dirname(last_edit_path), exist_ok=True)
+            with open(last_edit_path, "w") as out:
+                out.write(h.hexdigest())
+        except Exception:
+            pass
+
+        # Log hook.fired event (fail open)
+        try:
+            import importlib.util, pathlib
+            _spec = importlib.util.spec_from_file_location(
+                "event_logger",
+                pathlib.Path(proj) / ".ai" / "event_logger.py"
+            )
+            if _spec and _spec.loader:
+                _mod = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                _mod.log_event(
+                    "hook.fired", "context_sync", "active",
+                    metadata={"file_path": file_path, "rel": rel},
+                    project_dir=proj,
+                )
         except Exception:
             pass
 

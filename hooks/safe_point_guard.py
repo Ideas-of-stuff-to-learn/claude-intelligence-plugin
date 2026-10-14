@@ -27,8 +27,11 @@ def main():
         if os.path.exists(revert_path):
             with open(revert_path, encoding="utf-8") as f:
                 content = f.read()
-            if today in content and "in-progress" in content:
-                sys.exit(0)
+            # Parse structured markdown table rows: | date | status | ... |
+            for line in content.splitlines():
+                parts = [p.strip() for p in line.split('|') if p.strip()]
+                if len(parts) >= 2 and parts[0] == today and parts[1].lower() == 'in-progress':
+                    sys.exit(0)
 
         # No safe-point found for today
         print("No safe-point recorded for today — run /safe-point first before editing source files.", file=sys.stderr)
