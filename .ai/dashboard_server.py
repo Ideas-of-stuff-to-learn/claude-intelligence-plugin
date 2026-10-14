@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 _DEFAULT_PORT = 7654
 _HTML_PAGE = r"""<!DOCTYPE html>
@@ -80,6 +81,7 @@ _HTML_PAGE = r"""<!DOCTYPE html>
   <button class="tab-btn" data-tab="first-encounter" onclick="showTab('first-encounter')">First Encounter</button>
   <button class="tab-btn" data-tab="analysis" onclick="showTab('analysis')">Analysis</button>
   <button class="tab-btn" data-tab="plugin-tests" onclick="showTab('plugin-tests')">Plugin Tests</button>
+  <button class="tab-btn" data-tab="projects" onclick="showTab('projects')">Projects</button>
 </nav>
 
 <!-- OVERVIEW TAB -->
@@ -142,12 +144,103 @@ _HTML_PAGE = r"""<!DOCTYPE html>
 </div>
 </div>
 
+<!-- PROJECTS TAB -->
+<div class="tab-panel" id="tab-projects">
+<div class="main">
+  <div class="section">
+    <div class="section-title">Registered Projects</div>
+    <div id="projects-summary" style="margin-bottom:12px;font-size:13px;color:var(--muted)"></div>
+    <div class="card" id="projects-table-wrap">
+      <div class="empty">Loading…</div>
+    </div>
+    <div style="margin-top:16px">
+      <button class="run-btn" onclick="registerCurrent()">Register current project</button>
+      <span id="register-msg" style="margin-left:12px;font-size:12px;color:var(--muted)"></span>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+function dot(ok){return`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ok?'var(--green)':'var(--red)'};margin-right:3px"></span>`;}
+
+async function loadProjects(){
+  const data=await fetchJSON('/api/projects');
+  const list=Array.isArray(data)?data:[];
+  document.getElementById('projects-summary').textContent=`${list.length} project${list.length===1?'':'s'} registered`;
+  const wrap=document.getElementById('projects-table-wrap');
+  if(!list.length){
+    wrap.innerHTML=`<div class="hint">No projects registered yet. Run <code>python .ai/analyze_repo.py</code> in any repo using this plugin.</div>`;
+    return;
+  }
+  let rows=list.map((p,i)=>`<tr>
+    <td><strong>${p.name||'–'}</strong><br><span style="font-size:11px;color:var(--muted)">${p.path||''}</span></td>
+    <td>${p.install_date||'–'}</td>
+    <td>${p.last_active||'–'}</td>
+    <td>${p.files_indexed??'–'}</td>
+    <td>${p.events_count??'–'}</td>
+    <td>${dot(p.health&&p.health.db_exists)}${dot(p.health&&p.health.hooks_wired)}${dot(p.health&&p.health.context_populated)}</td>
+    <td><button class="run-btn" style="padding:4px 12px;font-size:12px" onclick="loadDetail('${encodeURIComponent(p.name)}',${i})">Details</button></td>
+  </tr>
+  <tr id="detail-row-${i}" style="display:none"><td colspan="7" id="detail-cell-${i}" style="padding:0"></td></tr>`).join('');
+  wrap.innerHTML=`<table><thead><tr><th>Name</th><th>Install Date</th><th>Last Active</th><th>Files</th><th>Events</th><th>Health</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function loadDetail(encodedName,idx){
+  const detailRow=document.getElementById(`detail-row-${idx}`);
+  const cell=document.getElementById(`detail-cell-${idx}`);
+  if(detailRow.style.display!=='none'){detailRow.style.display='none';return;}
+  cell.innerHTML='<div style="padding:16px"><div class="hint">Loading…</div></div>';
+  detailRow.style.display='';
+  const data=await fetchJSON(`/api/projects/${encodedName}`);
+  if(!data){cell.innerHTML='<div style="padding:16px" class="hint">Failed to load details.</div>';return;}
+  const git=data.git||{};
+  const activity=git.activity||[];
+  const maxCount=Math.max(1,...activity.map(a=>a.count||0));
+  const bars=activity.slice(-60).map(a=>{
+    const h=Math.max(2,Math.round((a.count/maxCount)*60));
+    return`<div title="${a.date}: ${a.count}" style="width:6px;height:${h}px;background:var(--accent);border-radius:2px 2px 0 0;flex-shrink:0"></div>`;
+  }).join('');
+  const actHtml=activity.length?`<div style="display:flex;align-items:flex-end;gap:2px;height:64px;overflow:hidden;margin-bottom:4px">${bars}</div><div style="font-size:11px;color:var(--muted)">Commit activity (last 90 days)</div>`:'<span class="hint">No activity data</span>';
+  const touches=git.component_touches||{};
+  const touchRows=Object.entries(touches).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  const commits=(git.recent_commits||[]).slice(0,10).map(c=>`<tr><td><code>${(c.hash||'').slice(0,7)}</code></td><td>${c.date||'–'}</td><td>${String(c.message||'').replace(/</g,'&lt;').slice(0,80)}</td></tr>`).join('');
+  const events=(data.recent_events||[]).slice(0,5).map(e=>`<tr><td>${fmt(e.timestamp)}</td><td>${tag(e.event_type,'tag-info')}</td><td>${e.component||'–'}</td></tr>`).join('');
+  cell.innerHTML=`<div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div>
+      <div class="section-title" style="font-size:12px">Git Activity</div>
+      ${actHtml}
+      <div class="section-title" style="font-size:12px;margin-top:12px">Component Touches</div>
+      <table><thead><tr><th>Component</th><th>Commits</th></tr></thead><tbody>${touchRows||'<tr><td colspan="2" class="hint">–</td></tr>'}</tbody></table>
+    </div>
+    <div>
+      <div class="section-title" style="font-size:12px">Recent Plugin Commits</div>
+      <table><thead><tr><th>Hash</th><th>Date</th><th>Message</th></tr></thead><tbody>${commits||'<tr><td colspan="3" class="hint">–</td></tr>'}</tbody></table>
+      <div class="section-title" style="font-size:12px;margin-top:12px">Last 5 Events</div>
+      <table><thead><tr><th>Time</th><th>Type</th><th>Component</th></tr></thead><tbody>${events||'<tr><td colspan="3" class="hint">–</td></tr>'}</tbody></table>
+    </div>
+  </div>`;
+}
+
+async function registerCurrent(){
+  const msg=document.getElementById('register-msg');
+  msg.textContent='Registering…';
+  try{
+    const r=await fetch('/api/projects/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:window.location.origin})});
+    const d=await r.json();
+    if(d&&d.ok){msg.style.color='var(--green)';msg.textContent='Registered!';loadProjects();}
+    else{msg.style.color='var(--red)';msg.textContent=(d&&d.error)||'Failed';}
+  }catch(e){msg.style.color='var(--red)';msg.textContent='Request failed';}
+}
+</script>
+
 <script>
 function showTab(name){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));
   if(name==='first-encounter')loadFirstEncounter();
   if(name==='analysis')loadAnalysis();
+  if(name==='projects')loadProjects();
 }
 function tag(text,cls){return`<span class="tag ${cls}">${text}</span>`}
 function statusTag(s){
@@ -536,6 +629,97 @@ def _api_tests(project_dir: str) -> Dict[str, Any]:
                 "output": str(e), "ran_at": ran_at, "returncode": -1}
 
 
+def _api_projects_list() -> List[Dict[str, Any]]:
+    """Return all registered projects with health snapshots."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from registry import list_projects
+        from analyze_repo import get_repo_summary  # noqa: F401
+    except Exception:
+        return []
+    result = []
+    for proj in list_projects():
+        path = proj.get('path', '')
+        try:
+            summary = get_repo_summary(path)
+            proj['health'] = summary.get('health', {})
+            proj['install_date'] = summary.get('install_date')
+            proj['last_active'] = summary.get('last_active')
+            proj['files_indexed'] = summary.get('files_indexed', 0)
+            proj['events_count'] = summary.get('events_count', 0)
+            proj['component_touches'] = summary.get('component_touches', {})
+        except Exception:
+            proj.setdefault('health', {})
+            proj.setdefault('install_date', None)
+            proj.setdefault('last_active', None)
+            proj.setdefault('files_indexed', 0)
+            proj.setdefault('events_count', 0)
+            proj.setdefault('component_touches', {})
+        result.append(proj)
+    return result
+
+
+def _api_project_detail(name: str) -> Optional[Dict[str, Any]]:
+    """Return drill-down for one project by name."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from registry import list_projects
+        from git_history import (get_install_date, get_last_active,
+                                  get_commit_activity, get_component_touches,
+                                  get_recent_commits)
+        from analyze_repo import get_first_encounter, get_analysis_passes
+    except Exception:
+        return None
+    entry = None
+    for p in list_projects():
+        if p.get('name') == name:
+            entry = p
+            break
+    if entry is None:
+        return None
+    path = entry.get('path', '')
+    git = {
+        'install_date': get_install_date(path),
+        'last_active': get_last_active(path),
+        'recent_commits': get_recent_commits(path),
+        'activity': get_commit_activity(path),
+        'component_touches': get_component_touches(path),
+    }
+    recent_events = _api_events(path, limit=5)
+    analysis_passes = {}
+    try:
+        for lens in ('semantic', 'structural', 'exact'):
+            passes = get_analysis_passes(path, lens=lens, limit=3)
+            analysis_passes[lens] = passes
+    except Exception:
+        pass
+    return {
+        'name': entry.get('name'),
+        'path': path,
+        'registered_at': entry.get('registered_at'),
+        'last_seen': entry.get('last_seen'),
+        'git': git,
+        'first_encounter': get_first_encounter(path),
+        'recent_events': recent_events,
+        'analysis_passes': analysis_passes,
+    }
+
+
+def _api_projects_register(body: bytes) -> Dict[str, Any]:
+    """Register a project from POST body {path: ...}."""
+    try:
+        data = json.loads(body.decode())
+        path = data.get('path', '')
+        if not path:
+            return {'ok': False, 'error': 'path is required'}
+        sys.path.insert(0, str(Path(__file__).parent))
+        from registry import register_project
+        register_project(path)
+        return {'ok': True}
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc)}
+
+
 def _api_health(project_dir: str) -> Dict[str, Any]:
     issues: List[str] = []
     proj = Path(project_dir)
@@ -594,7 +778,31 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/api/tests":
                 self._send_json(_api_tests(self.project_dir))
             elif path == "/api/projects":
-                self._send_json({"projects": [self.project_dir]})
+                self._send_json(_api_projects_list())
+            elif path.startswith("/api/projects/") and path != "/api/projects/":
+                proj_name = unquote(path[len("/api/projects/"):])
+                detail = _api_project_detail(proj_name)
+                if detail is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    self._send_json(detail)
+            else:
+                self.send_response(404)
+                self.end_headers()
+        except Exception as exc:
+            try:
+                self._send_json({"error": str(exc)}, 500)
+            except Exception:
+                pass
+
+    def do_POST(self) -> None:
+        try:
+            path = self.path.split("?")[0]
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length else b""
+            if path == "/api/projects/register":
+                self._send_json(_api_projects_register(body))
             else:
                 self.send_response(404)
                 self.end_headers()

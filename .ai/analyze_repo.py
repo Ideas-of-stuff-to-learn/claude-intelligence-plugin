@@ -392,10 +392,78 @@ def run_analysis(
         record_analysis_pass(project_dir, trigger, lens, findings, files_examined, duration_ms)
         results[lens] = findings
 
+    # Register project in global registry (fail-open)
+    try:
+        from registry import register_project
+        register_project(project_dir)
+    except Exception:
+        pass
+
     return {
         'files_discovered': len(all_files),
         'lenses_run': lenses,
         'results': results,
+    }
+
+
+def get_repo_summary(project_dir: str) -> Dict[str, Any]:
+    """Return a combined summary dict for a project."""
+    from pathlib import Path as _Path
+    try:
+        from git_history import get_install_date, get_last_active, get_component_touches
+        install_date = get_install_date(project_dir)
+        last_active = get_last_active(project_dir)
+        component_touches = get_component_touches(project_dir)
+    except Exception:
+        install_date = None
+        last_active = None
+        component_touches = {}
+
+    first_encounter = get_first_encounter(project_dir)
+
+    db_path = _get_db_path(project_dir)
+    db_exists = db_path.exists()
+    files_indexed = 0
+    events_count = 0
+    task_count = 0
+    if db_exists:
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=5)
+            try:
+                try:
+                    files_indexed = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+                except Exception:
+                    pass
+                try:
+                    events_count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+                except Exception:
+                    pass
+                try:
+                    task_count = conn.execute("SELECT COUNT(*) FROM task_history").fetchone()[0]
+                except Exception:
+                    pass
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    proj = _Path(project_dir)
+    hooks_wired = (proj / 'hooks').exists() and any((proj / 'hooks').glob('*.py'))
+    context_populated = (proj / 'context').exists() and any((proj / 'context').glob('*.md'))
+
+    return {
+        'first_encounter': first_encounter,
+        'install_date': install_date,
+        'last_active': last_active,
+        'component_touches': component_touches,
+        'files_indexed': files_indexed,
+        'events_count': events_count,
+        'task_count': task_count,
+        'health': {
+            'db_exists': db_exists,
+            'hooks_wired': hooks_wired,
+            'context_populated': context_populated,
+        },
     }
 
 
