@@ -5,8 +5,8 @@
 | Terminal | Command |
 |---|---|
 | Mac · Linux · WSL · Git Bash · zsh · bash · fish · nushell | `curl -fsSL https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.sh \| sh` |
-| PowerShell (5 or 7) | `Set-ExecutionPolicy Bypass -Scope Process -Force; iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing | iex` |
-| CMD | `powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing | iex"` |
+| PowerShell (5 or 7) | `Set-ExecutionPolicy Bypass -Scope Process -Force; iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing \| iex` |
+| CMD | `powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing \| iex"` |
 
 Restart your terminal after running.
 
