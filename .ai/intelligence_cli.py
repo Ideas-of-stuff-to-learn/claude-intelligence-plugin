@@ -484,7 +484,7 @@ def _get_remote_url(path: str) -> str:
 
 def print_repo_list_and_pick(repos: list) -> None:
     """Print repos grouped by remote URL, with sub-entries for multi-copy remotes."""
-    from collections import defaultdict, OrderedDict
+    from collections import OrderedDict
 
     # Group by remote URL, preserving first-seen order
     by_remote: dict = OrderedDict()
