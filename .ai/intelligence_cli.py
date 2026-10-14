@@ -370,10 +370,9 @@ def cmd_install(project_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 def find_local_git_repos(max_depth: int = 4) -> list:
-    """Scan common locations for git repos. Fast — stops descending into .git dirs."""
+    """Scan common locations for git repos. Returns list of dicts with path + metadata."""
     home = Path.home()
     search_roots = [home]
-    # Also include common project folder names under home
     for name in ('projects', 'work', 'code', 'dev', 'src', 'repos', 'git',
                  'workspace', 'Sites', 'Developer', 'Documents'):
         candidate = home / name
@@ -391,7 +390,6 @@ def find_local_git_repos(max_depth: int = 4) -> list:
                     continue
                 if (entry / '.git').exists():
                     found.add(str(entry.resolve()))
-                    # Don't recurse into repos
                 else:
                     walk(entry, depth - 1)
         except PermissionError:
@@ -400,19 +398,56 @@ def find_local_git_repos(max_depth: int = 4) -> list:
     for root in search_roots:
         walk(root, max_depth)
 
-    return sorted(found, key=lambda p: Path(p).name.lower())
+    repos = []
+    for path in sorted(found, key=lambda p: Path(p).name.lower()):
+        remote = _get_remote_url(path)
+        repos.append({
+            'path': path,
+            'name': Path(path).name,
+            'has_plugin': (Path(path) / '.ai').exists(),
+            'remote': remote,
+        })
+    return repos
+
+
+def _get_remote_url(path: str) -> str:
+    """Return the origin remote URL, or '' if none."""
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ['git', '-C', path, 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, timeout=3
+        )
+        return r.stdout.strip() if r.returncode == 0 else ''
+    except Exception:
+        return ''
 
 
 def print_repo_list_and_pick(repos: list) -> None:
-    """Print a numbered list of repo paths and offer a cd command."""
-    for i, path in enumerate(repos, 1):
-        name = Path(path).name
-        has_plugin = '[ci]' if (Path(path) / '.ai').exists() else '    '
-        print(f"  {i}) {has_plugin}  {name}  —  {path}")
+    """Print repos grouped by remote/no-remote, offer a cd command."""
+    with_remote = [r for r in repos if r['remote']]
+    local_only  = [r for r in repos if not r['remote']]
 
-    print()
-    print("  [ci] = claude intelligence plugin installed")
-    print()
+    all_ordered = []
+
+    def _print_group(group, heading):
+        if not group:
+            return
+        print(heading)
+        for r in group:
+            i = len(all_ordered) + 1
+            all_ordered.append(r)
+            ci   = '[ci]' if r['has_plugin'] else '    '
+            name = r['name']
+            remote_hint = f"  ({r['remote']})" if r['remote'] else ''
+            print(f"  {i}) {ci}  {name}  —  {r['path']}{remote_hint}")
+        print()
+
+    _print_group(with_remote, "  Connected to a remote:\n")
+    _print_group(local_only,  "  Local only (no remote):\n")
+
+    print("  [ci] = claude intelligence plugin installed\n")
+
     try:
         choice = input("Enter number to print cd command (or Enter to skip): ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -423,8 +458,8 @@ def print_repo_list_and_pick(repos: list) -> None:
         return
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(repos):
-            print(f"\n  cd \"{repos[idx]}\"")
+        if 0 <= idx < len(all_ordered):
+            print(f"\n  cd \"{all_ordered[idx]['path']}\"")
         else:
             print("Invalid selection.")
     except ValueError:
@@ -432,7 +467,7 @@ def print_repo_list_and_pick(repos: list) -> None:
 
 
 def cmd_repos() -> None:
-    """Scan for local git repos and offer navigation."""
+    """Scan for local git repos, grouped by remote presence."""
     print("Scanning for git repos...\n")
     repos = find_local_git_repos()
 
@@ -440,7 +475,8 @@ def cmd_repos() -> None:
         print("No git repos found in common locations under your home directory.")
         return
 
-    print(f"Found {len(repos)} git repo(s):\n")
+    n = len(repos)
+    print(f"Found {n} git repo(s):\n")
     print_repo_list_and_pick(repos)
 
 
@@ -472,7 +508,7 @@ def not_in_repo_prompt(proj: Path) -> None:
 
     print(f"Found {len(repos)} git repo(s):\n")
     print_repo_list_and_pick(repos)
-    sys.exit(1)
+    sys.exit(1)  # noqa: E501 — always exit after prompt; user must cd manually
 
 
 def cmd_setup_alias(plugin_dir: str) -> None:
