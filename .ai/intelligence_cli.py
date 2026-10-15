@@ -553,19 +553,17 @@ def print_repo_list_and_pick(repos: list) -> None:
     all_entries: list = []
 
     _NUM_W = 2   # width of top-level number column
-    _CONT = ' ' * 13  # continuation indent aligns with col 13 (after "  NN)  BBBB  ")
+    # "  NN)  " = 2+2+1+2 = 7 chars before name — tight, no badge column
+    _CONT = ' ' * 7  # continuation indent for remote/path lines
 
-    def _badge(r: dict) -> str:
-        return '[ci]' if r.get('has_plugin') else '    '
+    def _ci(has: bool) -> str:
+        return '  [ci]' if has else ''
 
-    def _group_badge(group: list) -> str:
-        return '[ci]' if any(r.get('has_plugin') for r in group) else '    '
-
-    def _entry(n: int, badge: str, content: str) -> str:
-        return f"  {n:>{_NUM_W}})  {badge}  {content}"
+    def _entry(n: int, name: str, has_ci: bool = False) -> str:
+        return f"  {n:>{_NUM_W}})  {name}{_ci(has_ci)}"
 
     def _sub(letter: str, path: str) -> str:
-        # Tight: 8-space indent, letter, ), two spaces, path
+        # Indented under the group: 8 spaces so it's clearly nested
         return f"        {letter})  {path}"
 
     # ── Connected to a remote ──────────────────────────────────────────────
@@ -579,13 +577,14 @@ def print_repo_list_and_pick(repos: list) -> None:
             if len(group) == 1:
                 r = group[0]
                 all_entries.append(r['path'])
-                print(_entry(n, _badge(r), name))
+                print(_entry(n, name, r.get('has_plugin', False)))
                 print(f"{_CONT}remote: {canonical_url}")
                 print(f"{_CONT}{r['path']}")
             else:
                 paths = [r['path'] for r in group]
                 all_entries.append(paths)
-                print(_entry(n, _group_badge(group), f"{name}  ({len(group)} local copies)"))
+                any_ci = any(r.get('has_plugin') for r in group)
+                print(_entry(n, f"{name}  ({len(group)} local copies)", any_ci))
                 print(f"{_CONT}remote: {canonical_url}")
                 for i, r in enumerate(group):
                     print(_sub(chr(ord('a') + i), r['path']))
@@ -597,7 +596,7 @@ def print_repo_list_and_pick(repos: list) -> None:
         for r in local_only:
             n = len(all_entries) + 1
             all_entries.append(r['path'])
-            print(_entry(n, _badge(r), r['name']))
+            print(_entry(n, r['name'], r.get('has_plugin', False)))
             print(f"{_CONT}{r['path']}")
         print()
 
