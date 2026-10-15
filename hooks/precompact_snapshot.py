@@ -255,15 +255,55 @@ def write_json_index(proj: str, platforms_written: list) -> None:
         json.dump(existing, f, indent=2)
 
 
+def _build_gist_content(proj: str) -> str:
+    """Build a single self-contained document: system prompt + context snapshot.
+
+    When an LLM reads this URL it gets everything — instructions AND current state.
+    No separate paste required.
+    """
+    # Load system prompt from plugin dir
+    plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    prompt_path = os.path.join(plugin_dir, 'adapters', 'cloud-llm', 'SYSTEM_PROMPT_UNIVERSAL.md')
+    system_prompt = ''
+    if os.path.exists(prompt_path):
+        with open(prompt_path, encoding='utf-8') as f:
+            # Strip the "paste this prompt" header — it's now auto-loaded
+            raw = f.read()
+            # Remove first 4 lines (title + paste instruction)
+            lines = raw.splitlines()
+            system_prompt = '\n'.join(lines[4:]).strip()
+
+    # Load context snapshot
+    generic_file = os.path.join(proj, 'context', 'compaction-generic.md')
+    snapshot = ''
+    if os.path.exists(generic_file):
+        with open(generic_file, encoding='utf-8') as f:
+            snapshot = f.read().strip()
+
+    proj_name = os.path.basename(proj)
+    import datetime
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+    return f'''<!-- CI Intelligence Plugin — auto-generated context bundle -->
+<!-- Fetching this URL loads both your instructions AND project context. -->
+<!-- Project: {proj_name} | Updated: {ts} -->
+
+{system_prompt}
+
+---
+
+## Current Project Context
+
+{snapshot if snapshot else f'_No snapshot yet. Run `ci snapshots --generate` in {proj_name}._'}
+'''
+
+
 def _try_gist_push(proj: str, platform: str) -> str:
-    """Push generic snapshot to GitHub Gist. Returns URL or empty string on failure."""
+    """Push combined system-prompt+context to GitHub Gist. Returns URL or empty string on failure."""
     import urllib.request
     import urllib.error
 
-    generic_file = os.path.join(proj, 'context', 'compaction-generic.md')
-    if not os.path.exists(generic_file):
-        return ''
-    content = open(generic_file, encoding='utf-8').read()
+    content = _build_gist_content(proj)
 
     gist_id_file = os.path.join(os.path.expanduser('~'), '.claude-intel', 'gist-id')
     gist_id = open(gist_id_file).read().strip() if os.path.exists(gist_id_file) else None

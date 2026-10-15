@@ -952,19 +952,46 @@ COMMANDS
         sys.exit(1)
 
 
+def _build_gist_content(proj: Path) -> str:
+    """Build one self-contained document: system prompt + context snapshot.
+    Pasting the Gist URL into any LLM loads both instructions and project state.
+    """
+    plugin_dir = Path(__file__).resolve().parent.parent
+    prompt_path = plugin_dir / 'adapters' / 'cloud-llm' / 'SYSTEM_PROMPT_UNIVERSAL.md'
+    system_prompt = ''
+    if prompt_path.exists():
+        raw = prompt_path.read_text()
+        lines = raw.splitlines()
+        system_prompt = '\n'.join(lines[4:]).strip()  # skip title + paste-instruction header
+
+    generic_file = proj / 'context' / 'compaction-generic.md'
+    snapshot = generic_file.read_text().strip() if generic_file.exists() else \
+        f'_No snapshot yet. Run `ci snapshots --generate` in {proj.name}._'
+
+    import datetime
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+    return f'''<!-- CI Intelligence Plugin — auto-generated context bundle -->
+<!-- Fetching this URL loads both your instructions AND project context. -->
+<!-- Project: {proj.name} | Updated: {ts} -->
+
+{system_prompt}
+
+---
+
+## Current Project Context
+
+{snapshot}
+'''
+
+
 def _gist_push(proj: Path, platform: str = 'generic') -> str:
-    """Push snapshot to a GitHub Gist. Returns the gist URL."""
+    """Push combined system-prompt+context to a GitHub Gist. Returns the gist URL."""
     import urllib.request
     import urllib.error
 
-    snap_file = proj / 'context' / f'compaction-{platform}.md'
-    generic_file = proj / 'context' / 'compaction-generic.md'
-    content = ''
-    if snap_file.exists():
-        content = snap_file.read_text()
-    elif generic_file.exists():
-        content = generic_file.read_text()
-    else:
+    content = _build_gist_content(proj)
+    if not content.strip():
         raise FileNotFoundError('No snapshot file found. Run: ci snapshots --generate')
 
     # Load stored gist ID (so we update instead of creating duplicates)
