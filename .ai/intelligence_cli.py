@@ -482,52 +482,119 @@ def _get_remote_url(path: str) -> str:
         return ''
 
 
+def _normalize_remote(url: str) -> str:
+    """Normalize git remote URL so SSH and HTTPS variants of the same repo group together.
+
+    git@github.com:user/repo.git  ->  github.com/user/repo
+    https://github.com/user/repo  ->  github.com/user/repo
+    """
+    if not url:
+        return url
+    u = url.strip().rstrip('/')
+    if u.endswith('.git'):
+        u = u[:-4]
+    # SSH: git@host:path  ->  host/path
+    if u.startswith('git@'):
+        u = u[4:].replace(':', '/', 1)
+    # HTTPS: strip scheme
+    for scheme in ('https://', 'http://'):
+        if u.startswith(scheme):
+            u = u[len(scheme):]
+            break
+    return u.lower()
+
+
 def print_repo_list_and_pick(repos: list) -> None:
-    """Print repos grouped by remote URL, with sub-entries for multi-copy remotes."""
+    """Print repos grouped by (normalized) remote URL.
+
+    Column layout — ASCII only, works in CMD / PowerShell / bash / zsh:
+
+      Single copy:
+        "  NN)  BBBB  Name"
+        "              remote: <url>"
+        "              <path>"
+
+      Multi-copy group (name in same column as single-copy name):
+        "              Name  (N local copies)"
+        "              remote: <url>"
+        "  NN)  BBBB  <path1>"
+        "  NN)  BBBB  <path2>"
+
+      Local-only:
+        "  NN)  BBBB  Name"
+        "              <path>"
+
+    Column offsets (0-based):
+      0-1   : leading spaces
+      2-3   : right-justified pick number (2 wide)
+      4     : )
+      5-6   : two spaces
+      7-10  : badge ([ci] or 4 spaces)
+      11-12 : two spaces
+      13+   : name / path content
+    """
     from collections import OrderedDict
 
-    # Group by remote URL, preserving first-seen order
-    by_remote: dict = OrderedDict()
+    # Group by *normalized* remote so SSH and HTTPS of the same repo merge
+    by_norm: dict = OrderedDict()
     local_only = []
     for r in repos:
         if r['remote']:
-            by_remote.setdefault(r['remote'], []).append(r)
+            norm = _normalize_remote(r['remote'])
+            by_norm.setdefault(norm, []).append(r)
         else:
             local_only.append(r)
 
-    # Each pickable entry maps a display number to a path
-    all_ordered = []  # list of paths in display order
+    all_paths: list = []   # indexed by pick-number (0-based)
 
-    def _ci(r):
-        return '[ci]' if r['has_plugin'] else '    '
+    # Fixed column widths
+    _NUM_W = 2              # digits in pick number
+    _BADGE_W = 4            # len('[ci]')
+    # Total prefix before content:  "  NN)  BBBB  " = 2+2+1+2+4+2 = 13
+    _CONT = ' ' * 13        # continuation indent for remote/path lines
 
-    if by_remote:
+    def _badge(r: dict) -> str:
+        return '[ci]' if r.get('has_plugin') else '    '
+
+    def _entry(n: int, badge: str, content: str) -> str:
+        return f"  {n:>{_NUM_W}})  {badge}  {content}"
+
+    def _group_hdr(name: str, count: int) -> str:
+        # No pick number — content starts at column 13 (same as _entry)
+        return f"{_CONT}{name}  ({count} local copies)"
+
+    # ── Connected to a remote ──────────────────────────────────────────────
+    if by_norm:
         print("  Connected to a remote:\n")
-        for remote_url, group in by_remote.items():
+        for _norm, group in by_norm.items():
+            canonical_url = group[0]['remote']
             name = group[0]['name']
+
             if len(group) == 1:
                 r = group[0]
-                i = len(all_ordered) + 1
-                all_ordered.append(r['path'])
-                print(f"  {i}) {_ci(r)}  {name}")
-                print(f"          {remote_url}")
-                print(f"          {r['path']}")
+                n = len(all_paths) + 1
+                all_paths.append(r['path'])
+                print(_entry(n, _badge(r), name))
+                print(f"{_CONT}remote: {canonical_url}")
+                print(f"{_CONT}{r['path']}")
             else:
-                # Multiple local copies of the same remote
-                print(f"       {_ci(group[0])}  {name}  — multiple local copies")
-                print(f"          {remote_url}")
+                # Multi-copy: header (no pick number), then one line per copy
+                print(_group_hdr(name, len(group)))
+                print(f"{_CONT}remote: {canonical_url}")
                 for r in group:
-                    i = len(all_ordered) + 1
-                    all_ordered.append(r['path'])
-                    print(f"          {i}) {_ci(r)}  {r['path']}")
+                    n = len(all_paths) + 1
+                    all_paths.append(r['path'])
+                    print(_entry(n, _badge(r), r['path']))
             print()
 
+    # ── Local only ────────────────────────────────────────────────────────
     if local_only:
         print("  Local only (no remote):\n")
         for r in local_only:
-            i = len(all_ordered) + 1
-            all_ordered.append(r['path'])
-            print(f"  {i}) {_ci(r)}  {r['name']}  —  {r['path']}")
+            n = len(all_paths) + 1
+            all_paths.append(r['path'])
+            print(_entry(n, _badge(r), r['name']))
+            print(f"{_CONT}{r['path']}")
         print()
 
     print("  [ci] = claude intelligence plugin installed\n")
@@ -545,8 +612,8 @@ def print_repo_list_and_pick(repos: list) -> None:
         return
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(all_ordered):
-            print(f"\n  cd \"{all_ordered[idx]}\"")
+        if 0 <= idx < len(all_paths):
+            print(f"\n  cd \"{all_paths[idx]}\"")
         else:
             print("Invalid selection.")
     except ValueError:
