@@ -2,17 +2,30 @@
 
 ## Install (once)
 
+**bash / zsh / fish / WSL / Git Bash / any Unix shell:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.sh | sh
 ```
 
+**PowerShell (Windows):**
+```powershell
+irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 | iex
+```
+
+**CMD (Windows):**
+```cmd
+powershell -Command "irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 | iex"
+```
+
+Restart your terminal after installing.
+
 ## Enable in any project
 
 ```bash
-ci install
+cii
 ```
 
-Detects new vs existing automatically. Re-running is safe — only adds what's missing.
+Same command in every terminal. Detects new vs existing automatically.
 
 ---
 
@@ -63,13 +76,13 @@ ci sync             sync context docs
 
 | Problem | Fix |
 |---------|-----|
-| `ci: not found` | `. ~/.bashrc` or restart terminal |
-| `health: ISSUES` | `ci install` again |
+| `ci: not found` | Restart terminal after install |
+| `health: ISSUES` | Run `cii` again |
 | No dashboard data | `ci rebuild` |
 | Port in use | `ci dashboard 8080` |
-
-**Windows/WSL:** re-run the installer if `ci` fails with "cannot execute" (fixes CRLF).
+| WSL: "cannot execute" | Re-run the bash installer (fixes CRLF) |
+| Windows: `cii` not found | Restart terminal; PATH is set for new sessions only |
 
 **Requirements:** Python 3.8+, Git 2.20+
 
-**Uninstall:** `rm -rf .ai .claude/hooks` (project) · `rm -rf ~/.claude-intel` (global)
+**Uninstall:** `rm -rf .ai .claude/hooks` (project) · `rm -rf ~/.claude-intel` (global, Unix) · `rmdir /s %USERPROFILE%\.claude-intel` (Windows)

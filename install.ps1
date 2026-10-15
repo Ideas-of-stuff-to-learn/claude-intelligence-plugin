@@ -1,48 +1,68 @@
-# Claude Intelligence Plugin installer for PowerShell
-# Usage (PowerShell): Set-ExecutionPolicy Bypass -Scope Process -Force; iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing | iex
-# Usage (CMD):        powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 -UseBasicParsing | iex"
+# Claude Intelligence Plugin — Windows installer (PowerShell)
+# Run with: irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
-$RepoUrl = "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
-$installDir = "$env:USERPROFILE\.claude-intel"
+$REPO_URL = "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
+$INSTALL_DIR = "$env:USERPROFILE\.claude-intel"
 
-# Check for required tools
+# Check git
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-Error "git is required. Install git and try again."
+    Write-Error "git is required. Install from https://git-scm.com and retry."
     exit 1
 }
 
-if (-not (Get-Command python -ErrorAction SilentlyContinue) -and -not (Get-Command python3 -ErrorAction SilentlyContinue)) {
-    Write-Error "Python 3 is required. Install Python 3 and try again."
+# Check python
+$python = if (Get-Command python -ErrorAction SilentlyContinue) { "python" }
+          elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
+          else { $null }
+if (-not $python) {
+    Write-Error "Python 3 is required. Install from https://python.org and retry."
     exit 1
 }
 
 # Clone or update
-if (Test-Path $installDir) {
-    $existingUrl = & git -C $installDir remote get-url origin 2>$null
-    if ($existingUrl -like "*Ideas-of-stuff-to-learn/claude-intelligence-plugin*") {
+if (Test-Path $INSTALL_DIR) {
+    $existing = git -C $INSTALL_DIR remote get-url origin 2>$null
+    if ($existing -like "*claude-intelligence-plugin*") {
         Write-Host "Updating existing installation..."
-        & git -C $installDir pull
-        Write-Host "[OK] Updated ~/.claude-intel"
+        git -C $INSTALL_DIR pull
+        Write-Host "✓ Updated $INSTALL_DIR"
     } else {
-        Write-Warning "~\.claude-intel exists but points to a different repo: $existingUrl"
-        Write-Warning "Remove it manually and re-run this script."
+        Write-Error "$INSTALL_DIR exists but points elsewhere. Remove it and retry."
         exit 1
     }
 } else {
     Write-Host "Cloning claude-intelligence-plugin..."
-    & git clone $RepoUrl $installDir
-    Write-Host "[OK] Cloned to ~/.claude-intel"
+    git clone $REPO_URL $INSTALL_DIR
+    Write-Host "✓ Cloned to $INSTALL_DIR"
 }
 
-# Add to user PATH permanently
-$current = [Environment]::GetEnvironmentVariable("PATH", "User")
-if ($current -notlike "*\.claude-intel*") {
-    [Environment]::SetEnvironmentVariable("PATH", "$installDir;$current", "User")
-    Write-Host "[OK] Added to PATH (restart terminal to apply)"
+# Write ci.bat wrapper
+$bat = @"
+@echo off
+$python "$INSTALL_DIR\.ai\intelligence_cli.py" %*
+"@
+Set-Content -Path "$INSTALL_DIR\ci.bat" -Value $bat -Encoding ASCII
+Write-Host "✓ Created ci.bat"
+
+# Write cii.bat alias
+$cii = @"
+@echo off
+$python "$INSTALL_DIR\.ai\intelligence_cli.py" install %*
+"@
+Set-Content -Path "$INSTALL_DIR\cii.bat" -Value $cii -Encoding ASCII
+Write-Host "✓ Created cii.bat"
+
+# Add to user PATH if not already there
+$userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+if ($userPath -notlike "*claude-intel*") {
+    [Environment]::SetEnvironmentVariable("PATH", "$INSTALL_DIR;$userPath", "User")
+    Write-Host "✓ Added to PATH (user)"
 } else {
-    Write-Host "[OK] PATH already contains ~/.claude-intel (skipping)"
+    Write-Host "✓ PATH already set (skipping)"
 }
 
 Write-Host ""
-Write-Host "Restart your terminal, then run 'ci help' to see what you can do."
+Write-Host "Done. Restart your terminal, then:"
+Write-Host "  cd your-project"
+Write-Host "  cii"
