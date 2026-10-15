@@ -13,6 +13,8 @@
 # If Defender blocks the download, download the zip manually:
 #   https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/archive/refs/heads/main.zip
 
+# Bypass execution policy for this session (needed when AllSigned or Restricted is set)
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force 2>$null
 $ErrorActionPreference = "Stop"
 
 $REPO_URL  = "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
@@ -108,7 +110,8 @@ $cii = "@echo off`r`n$python `"$INSTALL_DIR\.ai\intelligence_cli.py`" install %*
 Write-Host "✓ Created ci.bat + cii.bat"
 
 # ── Add to user PATH ──────────────────────────────────────────────────────────
-$userPath = [Environment]::GetEnvironmentVariable("PATH", "User") ?? ""
+$userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+if (-not $userPath) { $userPath = "" }
 if ($userPath -notlike "*claude-intel*") {
     [Environment]::SetEnvironmentVariable("PATH", "$INSTALL_DIR;$userPath", "User")
     # Also update current session PATH so cii works without restart (best effort)
