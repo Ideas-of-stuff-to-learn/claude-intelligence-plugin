@@ -514,15 +514,13 @@ def print_repo_list_and_pick(repos: list) -> None:
         "              remote: <url>"
         "              <path>"
 
-      Multi-copy group (name in same column as single-copy name):
-        "              Name  (N local copies)"
+      Multi-copy group — group gets a number, copies get letters:
+        "  NN)  BBBB  Name  (N local copies)"
         "              remote: <url>"
-        "  NN)  BBBB  <path1>"
-        "  NN)  BBBB  <path2>"
+        "        a)  <path1>"
+        "        b)  <path2>"
 
-      Local-only:
-        "  NN)  BBBB  Name"
-        "              <path>"
+      Picking a group number shows the a/b/c sub-menu.
 
     Column offsets (0-based):
       0-1   : leading spaces
@@ -531,7 +529,13 @@ def print_repo_list_and_pick(repos: list) -> None:
       5-6   : two spaces
       7-10  : badge ([ci] or 4 spaces)
       11-12 : two spaces
-      13+   : name / path content
+      13+   : name content
+    Sub-entry (indented, tight):
+      0-7   : eight spaces
+      8     : letter
+      9     : )
+      10-11 : two spaces
+      12+   : path
     """
     from collections import OrderedDict
 
@@ -545,28 +549,24 @@ def print_repo_list_and_pick(repos: list) -> None:
         else:
             local_only.append(r)
 
-    all_paths: list = []   # indexed by pick-number (0-based)
+    # Each top-level entry is either a str (single path) or list[str] (multi-copy)
+    all_entries: list = []
 
-    # Fixed column widths
-    _NUM_W = 2              # digits in pick number
-    # Top-level entry prefix:  "  NN)  BBBB  " = 2+2+1+2+4+2 = 13 chars
-    # Sub-entry adds 4 leading spaces, so number starts at col 6 instead of 2
-    _CONT = ' ' * 13        # continuation indent for remote/path lines
-    _SUB_PFX = '    '       # extra 4-space indent for sub-entries under a group
+    _NUM_W = 2   # width of top-level number column
+    _CONT = ' ' * 13  # continuation indent aligns with col 13 (after "  NN)  BBBB  ")
 
     def _badge(r: dict) -> str:
         return '[ci]' if r.get('has_plugin') else '    '
 
+    def _group_badge(group: list) -> str:
+        return '[ci]' if any(r.get('has_plugin') for r in group) else '    '
+
     def _entry(n: int, badge: str, content: str) -> str:
         return f"  {n:>{_NUM_W}})  {badge}  {content}"
 
-    def _entry_sub(n: int, badge: str, content: str) -> str:
-        return f"{_SUB_PFX}  {n:>{_NUM_W}})  {badge}  {content}"
-
-    def _group_hdr(name: str, count: int) -> str:
-        # Use '--' in the number column so the name lands at col 13,
-        # same as single-copy entry names.  Badge field left blank.
-        return f"  {'--':>{_NUM_W}})  {'':4}  {name}  ({count} local copies)"
+    def _sub(letter: str, path: str) -> str:
+        # Tight: 8-space indent, letter, ), two spaces, path
+        return f"        {letter})  {path}"
 
     # ── Connected to a remote ──────────────────────────────────────────────
     if by_norm:
@@ -574,30 +574,29 @@ def print_repo_list_and_pick(repos: list) -> None:
         for _norm, group in by_norm.items():
             canonical_url = group[0]['remote']
             name = group[0]['name']
+            n = len(all_entries) + 1
 
             if len(group) == 1:
                 r = group[0]
-                n = len(all_paths) + 1
-                all_paths.append(r['path'])
+                all_entries.append(r['path'])
                 print(_entry(n, _badge(r), name))
                 print(f"{_CONT}remote: {canonical_url}")
                 print(f"{_CONT}{r['path']}")
             else:
-                # Multi-copy: header (no pick number), then indented sub-entries
-                print(_group_hdr(name, len(group)))
+                paths = [r['path'] for r in group]
+                all_entries.append(paths)
+                print(_entry(n, _group_badge(group), f"{name}  ({len(group)} local copies)"))
                 print(f"{_CONT}remote: {canonical_url}")
-                for r in group:
-                    n = len(all_paths) + 1
-                    all_paths.append(r['path'])
-                    print(_entry_sub(n, _badge(r), r['path']))
+                for i, r in enumerate(group):
+                    print(_sub(chr(ord('a') + i), r['path']))
             print()
 
     # ── Local only ────────────────────────────────────────────────────────
     if local_only:
         print("  Local only (no remote):\n")
         for r in local_only:
-            n = len(all_paths) + 1
-            all_paths.append(r['path'])
+            n = len(all_entries) + 1
+            all_entries.append(r['path'])
             print(_entry(n, _badge(r), r['name']))
             print(f"{_CONT}{r['path']}")
         print()
@@ -607,22 +606,48 @@ def print_repo_list_and_pick(repos: list) -> None:
     if not sys.stdin.isatty():
         return
 
+    # ── Interactive picker ────────────────────────────────────────────────
     try:
-        choice = input("Enter number to print cd command (or Enter to skip): ").strip()
+        choice = input("Enter number (or Enter to skip): ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
         return
 
     if not choice:
         return
+
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(all_paths):
-            print(f"\n  cd \"{all_paths[idx]}\"")
-        else:
-            print("Invalid selection.")
     except ValueError:
         print("Invalid input.")
+        return
+
+    if not 0 <= idx < len(all_entries):
+        print("Invalid selection.")
+        return
+
+    entry = all_entries[idx]
+
+    if isinstance(entry, str):
+        print(f"\n  cd \"{entry}\"")
+    else:
+        # Multi-copy: show a/b/c sub-menu
+        print()
+        for i, path in enumerate(entry):
+            print(f"  {chr(ord('a') + i)})  {path}")
+        print()
+        try:
+            sub = input("Enter letter (or Enter to skip): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not sub:
+            return
+        si = ord(sub[0]) - ord('a')
+        if len(sub) == 1 and 0 <= si < len(entry):
+            print(f"\n  cd \"{entry[si]}\"")
+        else:
+            print("Invalid selection.")
 
 
 def cmd_repos() -> None:
