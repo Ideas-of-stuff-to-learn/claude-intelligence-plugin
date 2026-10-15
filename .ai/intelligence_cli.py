@@ -187,9 +187,21 @@ def cmd_budget(proj, task_description):
         print(f"Budget unavailable: {exc}")
 
 
-def cmd_dashboard(proj):
-    print("Starting dashboard at http://localhost:7654")
-    print(f"Run: python {proj / '.ai' / 'dashboard_server.py'}")
+def cmd_dashboard(proj, port: int = 7654):
+    server_script = proj / '.ai' / 'dashboard_server.py'
+    if not server_script.exists():
+        # Try plugin's own dashboard_server
+        server_script = Path(__file__).resolve().parent / 'dashboard_server.py'
+    if not server_script.exists():
+        print("ERROR: dashboard_server.py not found. Run: ci install")
+        sys.exit(1)
+    print(f"Starting Intelligence Dashboard at http://localhost:{port}")
+    print("Press Ctrl+C to stop.\n")
+    try:
+        os.execv(sys.executable, [sys.executable, '-I', str(server_script),
+                                   str(proj), '--port', str(port)])
+    except KeyboardInterrupt:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +754,62 @@ def cmd_setup_alias(plugin_dir: str) -> None:
     print("  ci install")
 
 
+def cmd_export_context(proj, to_file: bool = False) -> None:
+    """Generate a compact context snapshot for pasting into a cloud LLM."""
+    ctx = proj / 'context'
+    lines = ['=== CI CONTEXT SNAPSHOT ===']
+    lines.append(f"Project: {proj.name}")
+
+    import datetime as _dt
+    lines.append(f"Exported: {_dt.datetime.now(_dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+
+    # Stack from overview.md
+    overview = ctx / 'overview.md'
+    if overview.exists():
+        text = overview.read_text()
+        # Grab first 8 non-empty lines
+        snippet = '\n'.join(
+            l for l in text.splitlines() if l.strip()
+        )[:600]
+        lines.append(f"\n--- overview.md (excerpt) ---\n{snippet}\n")
+
+    # Current task
+    ct = ctx / 'current-task.md'
+    if ct.exists():
+        text = ct.read_text()
+        snippet = '\n'.join(l for l in text.splitlines() if l.strip())[:400]
+        lines.append(f"--- current-task.md ---\n{snippet}\n")
+
+    # Last handoff entry
+    hf = ctx / 'handoff.md'
+    if hf.exists():
+        text = hf.read_text()
+        # Take the first entry (up to 400 chars)
+        lines.append(f"--- handoff.md (latest entry) ---\n{text[:400].strip()}\n")
+
+    # Constraints
+    cn = ctx / 'constraints.md'
+    if cn.exists():
+        text = cn.read_text()
+        lines.append(f"--- constraints.md (excerpt) ---\n{text[:300].strip()}\n")
+
+    # Known problems
+    kp = ctx / 'known-problems.md'
+    if kp.exists():
+        text = kp.read_text()
+        lines.append(f"--- known-problems.md (excerpt) ---\n{text[:300].strip()}\n")
+
+    lines.append('=== END CI CONTEXT SNAPSHOT ===')
+    output = '\n'.join(lines)
+
+    if to_file:
+        out_path = proj / '.ai' / 'cloud-context.txt'
+        out_path.write_text(output)
+        print(f"Context snapshot written to: {out_path}")
+    else:
+        print(output)
+
+
 def cmd_log_event(proj, event_type, component, status):
     try:
         sys.path.insert(0, str(proj / '.ai'))
@@ -795,8 +863,16 @@ def main():
     elif cmd == 'budget' and len(args) > 1:
         cmd_budget(proj, ' '.join(args[1:]))
     elif cmd == 'dashboard':
-        project_dir = args[1] if len(args) > 1 else str(proj)
-        cmd_dashboard(Path(project_dir))
+        port = 7654
+        project_dir = str(proj)
+        for a in args[1:]:
+            if a.startswith('--port='):
+                port = int(a.split('=', 1)[1])
+            elif a.isdigit():
+                port = int(a)
+            else:
+                project_dir = a
+        cmd_dashboard(Path(project_dir), port)
     elif cmd == 'log-event' and len(args) >= 4:
         cmd_log_event(proj, args[1], args[2], args[3])
     elif cmd == 'install':
@@ -808,6 +884,15 @@ def main():
         cmd_setup_alias(plugin_dir)
     elif cmd in ('repos', 'projects'):
         cmd_repos()
+    elif cmd == 'export-context':
+        to_file = '--file' in args
+        cmd_export_context(proj, to_file)
+    elif cmd == 'pentest':
+        pentest_script = Path(__file__).resolve().parent / 'pentest_runner.py'
+        if not pentest_script.exists():
+            print("ERROR: pentest_runner.py not found. Run: ci install")
+            sys.exit(1)
+        os.execv(sys.executable, [sys.executable, '-I', str(pentest_script)] + args[1:])
     elif cmd in ('help', '--help', '-h'):
         print("""ci — Claude Intelligence Plugin
 
@@ -825,6 +910,7 @@ COMMANDS
   rebuild          Rebuild the SQLite index
   sync             Sync context markdown files into index
   repos            List all registered repos (navigate to one)
+  pentest <type> <target>  Sandboxed security scan (web|source|cli|docker|report)
   setup-alias      Add ci to PATH for your shell
   log-event <type> <component> <status>
   help             Show this message

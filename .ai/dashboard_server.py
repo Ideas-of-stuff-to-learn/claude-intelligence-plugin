@@ -82,6 +82,8 @@ _HTML_PAGE = r"""<!DOCTYPE html>
   <button class="tab-btn" data-tab="analysis" onclick="showTab('analysis')">Analysis</button>
   <button class="tab-btn" data-tab="plugin-tests" onclick="showTab('plugin-tests')">Plugin Tests</button>
   <button class="tab-btn" data-tab="projects" onclick="showTab('projects')">Projects</button>
+  <button class="tab-btn" data-tab="security" onclick="showTab('security')">Security</button>
+  <button class="tab-btn" data-tab="allrepos" onclick="showTab('allrepos')">All Repos</button>
 </nav>
 
 <!-- OVERVIEW TAB -->
@@ -140,6 +142,29 @@ _HTML_PAGE = r"""<!DOCTYPE html>
       <button class="run-btn" id="run-tests-btn" onclick="runTests()">Run Tests</button>
       <div id="tests-result" style="margin-top:16px"></div>
     </div>
+  </div>
+</div>
+</div>
+
+<!-- SECURITY TAB -->
+<div class="tab-panel" id="tab-security">
+<div class="main">
+  <div class="section">
+    <div class="section-title">Security Scan Findings</div>
+    <div id="security-content"><div class="card"><div class="empty">Loading…</div></div></div>
+  </div>
+  <div style="margin-top:12px;font-size:12px;color:var(--muted)">
+    Run a scan: <code>ci pentest source .</code> &nbsp;|&nbsp; <code>ci pentest web http://localhost:3000</code>
+  </div>
+</div>
+</div>
+
+<!-- ALL REPOS TAB -->
+<div class="tab-panel" id="tab-allrepos">
+<div class="main">
+  <div class="section">
+    <div class="section-title">All Connected Repos</div>
+    <div id="allrepos-content"><div class="card"><div class="empty">Loading…</div></div></div>
   </div>
 </div>
 </div>
@@ -222,6 +247,54 @@ async function loadDetail(encodedName,idx){
   </div>`;
 }
 
+async function loadSecurity(){
+  const el=document.getElementById('security-content');
+  const data=await fetchJSON('/api/security');
+  if(!data||!data.exists){
+    el.innerHTML=`<div class="card"><div class="hint">No security report yet. Run: <code>ci pentest source .</code></div></div>`;
+    return;
+  }
+  const SEV_COLOR={'CRITICAL':'var(--red)','HIGH':'#f97316','MEDIUM':'var(--yellow)','LOW':'var(--blue)','INFO':'var(--muted)'};
+  const counts=data.counts||{};
+  const summary=Object.entries(counts).map(([s,n])=>`<span class="tag" style="background:${SEV_COLOR[s]||'#333'};color:#fff;margin-right:4px">${s}: ${n}</span>`).join('');
+  const findings=data.findings||[];
+  const rows=findings.map(f=>`<tr>
+    <td><span class="tag" style="background:${SEV_COLOR[f.severity]||'#333'};color:#fff;font-size:10px">${f.severity}</span></td>
+    <td>${f.category||'–'}</td>
+    <td>${String(f.description||'').replace(/</g,'&lt;')}</td>
+    <td><code style="font-size:11px">${String(f.evidence||'').replace(/</g,'&lt;').slice(0,80)}</code></td>
+    <td style="color:var(--muted);font-size:12px">${String(f.fix||'').slice(0,60)}</td>
+  </tr>`).join('');
+  el.innerHTML=`<div class="card">
+    <div style="margin-bottom:12px">${summary||'<span class="hint">No findings</span>'}</div>
+    ${rows?`<table><thead><tr><th>Severity</th><th>Category</th><th>Description</th><th>Evidence</th><th>Fix</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty">No findings — scan passed ✓</div>'}
+    <div class="refresh-note">Last scanned: ${data.scanned_at?new Date(data.scanned_at*1000).toLocaleString():'unknown'}</div>
+  </div>`;
+}
+
+async function loadAllRepos(){
+  const el=document.getElementById('allrepos-content');
+  const data=await fetchJSON('/api/repos-summary');
+  const projects=(data&&data.projects)||[];
+  if(!projects.length){
+    el.innerHTML=`<div class="card"><div class="hint">No repos registered. Run <code>ci install</code> in each project.</div></div>`;
+    return;
+  }
+  const SEC_BADGE={'critical':'🔴','high':'🟠','medium':'🟡','ok':'🟢','none':'⚪'};
+  const rows=projects.map(p=>`<tr>
+    <td><strong>${p.name||'–'}</strong><br><span style="font-size:11px;color:var(--muted)">${p.path||''}</span></td>
+    <td>${p.current_task?`<span style="font-size:12px">${String(p.current_task).replace(/</g,'&lt;').slice(0,80)}</span>`:'<span class="hint">–</span>'}</td>
+    <td>${(p.context_docs||[]).map(d=>`<span class="tag tag-info" style="margin:1px;font-size:10px">${d}</span>`).join('')||'–'}</td>
+    <td>${SEC_BADGE[p.security_status]||'⚪'} ${p.security_status||'none'}</td>
+    <td>${p.last_seen?new Date(p.last_seen).toLocaleDateString():'–'}</td>
+  </tr>`).join('');
+  el.innerHTML=`<div class="card">
+    <div style="margin-bottom:8px;color:var(--muted);font-size:12px">${projects.length} repo${projects.length===1?'':'s'} registered</div>
+    <table><thead><tr><th>Repo</th><th>Current Task</th><th>Context Docs</th><th>Security</th><th>Last Seen</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+  </div>`;
+}
+
 async function registerCurrent(){
   const msg=document.getElementById('register-msg');
   msg.textContent='Registering…';
@@ -241,6 +314,8 @@ function showTab(name){
   if(name==='first-encounter')loadFirstEncounter();
   if(name==='analysis')loadAnalysis();
   if(name==='projects')loadProjects();
+  if(name==='security')loadSecurity();
+  if(name==='allrepos')loadAllRepos();
 }
 function tag(text,cls){return`<span class="tag ${cls}">${text}</span>`}
 function statusTag(s){
@@ -720,6 +795,104 @@ def _api_projects_register(body: bytes) -> Dict[str, Any]:
         return {'ok': False, 'error': str(exc)}
 
 
+def _api_security(project_dir: str) -> Dict[str, Any]:
+    """Return last pentest findings from context/security.md."""
+    report = Path(project_dir) / 'context' / 'security.md'
+    if not report.exists():
+        return {'exists': False, 'findings': [], 'raw': ''}
+    raw = report.read_text()
+    # Parse findings sections
+    findings = []
+    current = {}
+    for line in raw.splitlines():
+        if line.startswith('### ['):
+            if current:
+                findings.append(current)
+            # "[Category] Description"
+            m = line[4:].strip()
+            cat = m[1:m.index(']')] if ']' in m else 'Unknown'
+            desc = m[m.index(']')+1:].strip() if ']' in m else m
+            current = {'category': cat, 'description': desc,
+                       'severity': '?', 'evidence': '', 'fix': ''}
+        elif line.startswith('## ') and line[3:].strip().isupper():
+            # severity heading
+            sev = line[3:].strip()
+            # next findings will get this severity
+            if current:
+                current['severity'] = sev
+        elif line.startswith('**Evidence:**') and current:
+            current['evidence'] = line[13:].strip().strip('`')
+        elif line.startswith('**Fix:**') and current:
+            current['fix'] = line[8:].strip()
+    if current:
+        findings.append(current)
+
+    counts = {}
+    for f in findings:
+        sev = f.get('severity', '?')
+        counts[sev] = counts.get(sev, 0) + 1
+
+    return {
+        'exists': True,
+        'findings': findings,
+        'counts': counts,
+        'raw': raw[:4000],
+        'scanned_at': report.stat().st_mtime,
+    }
+
+
+def _api_repos_summary() -> Dict[str, Any]:
+    """Return a lightweight summary of all registered repos for the multi-repo panel."""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from registry import list_projects
+    except Exception:
+        return {'projects': []}
+
+    projects = []
+    for proj in list_projects():
+        path = proj.get('path', '')
+        ctx = Path(path) / 'context'
+        summary = {
+            'name': proj.get('name', Path(path).name),
+            'path': path,
+            'last_seen': proj.get('last_seen', ''),
+            'has_ci': bool(path and (Path(path) / '.ai').exists()),
+            'context_docs': [],
+            'current_task': '',
+            'security_status': 'none',
+        }
+        # Read current task
+        ct_file = ctx / 'current-task.md'
+        if ct_file.exists():
+            text = ct_file.read_text()
+            # Extract first non-empty, non-heading line
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith('#'):
+                    summary['current_task'] = stripped[:100]
+                    break
+        # Check which context docs exist
+        for doc in ['overview', 'architecture', 'handoff', 'constraints',
+                    'known-problems', 'current-task', 'security']:
+            if (ctx / f'{doc}.md').exists():
+                summary['context_docs'].append(doc)
+        # Security status
+        sec = ctx / 'security.md'
+        if sec.exists():
+            raw = sec.read_text()
+            if 'CRITICAL' in raw:
+                summary['security_status'] = 'critical'
+            elif 'HIGH' in raw:
+                summary['security_status'] = 'high'
+            elif 'MEDIUM' in raw:
+                summary['security_status'] = 'medium'
+            else:
+                summary['security_status'] = 'ok'
+        projects.append(summary)
+    return {'projects': projects}
+
+
 def _api_health(project_dir: str) -> Dict[str, Any]:
     issues: List[str] = []
     proj = Path(project_dir)
@@ -777,6 +950,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(_api_analysis(self.project_dir))
             elif path == "/api/tests":
                 self._send_json(_api_tests(self.project_dir))
+            elif path == "/api/security":
+                self._send_json(_api_security(self.project_dir))
+            elif path == "/api/repos-summary":
+                self._send_json(_api_repos_summary())
             elif path == "/api/projects":
                 self._send_json(_api_projects_list())
             elif path.startswith("/api/projects/") and path != "/api/projects/":
