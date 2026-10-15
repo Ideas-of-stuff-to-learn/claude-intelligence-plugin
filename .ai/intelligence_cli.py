@@ -564,8 +564,9 @@ def print_repo_list_and_pick(repos: list) -> None:
         return f"{_SUB_PFX}  {n:>{_NUM_W}})  {badge}  {content}"
 
     def _group_hdr(name: str, count: int) -> str:
-        # No pick number — content starts at column 13 (same as _entry)
-        return f"{_CONT}{name}  ({count} local copies)"
+        # Use '--' in the number column so the name lands at col 13,
+        # same as single-copy entry names.  Badge field left blank.
+        return f"  {'--':>{_NUM_W}})  {'':4}  {name}  ({count} local copies)"
 
     # ── Connected to a remote ──────────────────────────────────────────────
     if by_norm:
