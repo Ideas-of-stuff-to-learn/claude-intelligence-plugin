@@ -36,12 +36,20 @@ else
     echo "✓ Cloned to ~/.claude-intel"
 fi
 
-# Strip Windows CRLF from the ci script — git with core.autocrlf=true
-# (common on Windows/WSL) can add \r even when .gitattributes says eol=lf,
-# and bash/sh reject a shebang of '#!/bin/sh\r' with "file not found".
-if command -v sed >/dev/null 2>&1; then
-    sed -i 's/\r//' "$INSTALL_DIR/ci"
+# Rewrite the ci wrapper with guaranteed LF endings and the right python name.
+# We do this instead of relying on .gitattributes because git with
+# core.autocrlf=true (default on Windows) or WSL clones on NTFS can add \r
+# even when .gitattributes says eol=lf, causing "cannot execute: required
+# file not found" errors in bash.
+cat > "$INSTALL_DIR/ci" <<'CIWRAPPER'
+#!/bin/sh
+PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
+else
+    exec python "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
 fi
+CIWRAPPER
 
 # Make ci executable
 chmod +x "$INSTALL_DIR/ci"

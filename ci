@@ -2,4 +2,9 @@
 # Claude Intelligence CLI wrapper
 # This file lives in ~/.claude-intel and is on PATH after install
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec python "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
+# Prefer python3; fall back to python for environments that only ship one name
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
+else
+    exec python "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
+fi
