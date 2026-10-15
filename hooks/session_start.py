@@ -52,6 +52,14 @@ def main():
         print("SESSION START — Intelligence System")
         print("=" * 60)
 
+        # Mode detection — tell the LLM explicitly what it has access to
+        has_context = os.path.exists(os.path.join(proj, "context", "overview.md"))
+        has_db = os.path.exists(os.path.join(proj, ".ai", "knowledge.db"))
+        print("\n[Mode B: Native — local file access confirmed]")
+        print(f"  Project:  {proj}")
+        print(f"  context/: {'✓' if has_context else '⚠ not found (run ci install)'}")
+        print(f"  knowledge.db: {'✓' if has_db else '⚠ run ci rebuild'}")
+
         # Print newest handoff block
         handoff_path = os.path.join(proj, "context", "handoff.md")
         handoff = newest_handoff_block(handoff_path)

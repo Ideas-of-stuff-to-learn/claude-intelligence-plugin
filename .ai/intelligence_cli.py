@@ -794,7 +794,7 @@ def cmd_export_context(proj, to_file: bool = False) -> None:
         text = overview.read_text()
         # Grab first 8 non-empty lines
         snippet = '\n'.join(
-            l for l in text.splitlines() if l.strip()
+            line for line in text.splitlines() if line.strip()
         )[:600]
         lines.append(f"\n--- overview.md (excerpt) ---\n{snippet}\n")
 
@@ -802,7 +802,7 @@ def cmd_export_context(proj, to_file: bool = False) -> None:
     ct = ctx / 'current-task.md'
     if ct.exists():
         text = ct.read_text()
-        snippet = '\n'.join(l for l in text.splitlines() if l.strip())[:400]
+        snippet = '\n'.join(line for line in text.splitlines() if line.strip())[:400]
         lines.append(f"--- current-task.md ---\n{snippet}\n")
 
     # Last handoff entry
@@ -920,6 +920,8 @@ def main():
         os.execv(sys.executable, [sys.executable, '-I', str(pentest_script)] + args[1:])
     elif cmd == 'test':
         cmd_surgical_test(proj, args[1:])
+    elif cmd == 'snapshots':
+        cmd_snapshots(proj, args[1:])
     elif cmd in ('help', '--help', '-h'):
         print("""ci — Claude Intelligence Plugin
 
@@ -940,6 +942,7 @@ COMMANDS
   pentest <type> <target>  Sandboxed security scan (web|source|cli|docker|report)
   test             Surgical test runner — only tests affected by recent changes
   test --all       Run full test suite
+  snapshots        List compaction snapshots; pass platform name to show that one
   setup-alias      Add ci to PATH for your shell
   log-event <type> <component> <status>
   help             Show this message
@@ -947,6 +950,84 @@ COMMANDS
     else:
         print(f"Unknown command: {cmd}\nRun 'ci help' to see all commands.")
         sys.exit(1)
+
+
+def cmd_snapshots(proj: Path, args: list) -> None:
+    """List compaction snapshots saved when sessions hit context limits.
+
+    ci snapshots                  — list all saved snapshots
+    ci snapshots claude           — show the Claude snapshot
+    ci snapshots chatgpt          — show ChatGPT snapshot
+    ci snapshots <url>            — detect platform from URL, show that snapshot
+    """
+    _URL_TO_PLATFORM = {
+        'claude.ai':      'claude',
+        'chat.openai.com':'chatgpt',
+        'chatgpt.com':    'chatgpt',
+        'gemini.google':  'gemini',
+        'bard.google':    'gemini',
+        'github.com/copilot': 'copilot',
+        'cursor.':        'cursor',
+        'windsurf.':      'windsurf',
+    }
+    _KNOWN_PLATFORMS = ['claude', 'chatgpt', 'gemini', 'copilot', 'cursor', 'windsurf', 'generic']
+
+    index_path = proj / '.ai' / 'compaction-index.json'
+    ctx = proj / 'context'
+
+    # Resolve target platform from args
+    target = args[0] if args else None
+    if target:
+        # URL → platform
+        for url_fragment, platform in _URL_TO_PLATFORM.items():
+            if url_fragment in target:
+                target = platform
+                break
+
+    # List mode
+    if not target:
+        if not index_path.exists():
+            print("No compaction snapshots found.")
+            print("Snapshots are saved automatically when a session approaches its context limit.")
+            print("Trigger manually: ci snapshots --generate")
+            return
+        idx = json.loads(index_path.read_text())
+        print(f"Compaction snapshots for: {proj.name}\n")
+        for p, info in idx.items():
+            fpath = proj / info['file']
+            exists = '✓' if fpath.exists() else '✗'
+            print(f"  {exists}  {p:12s}  {info.get('updated','')[:16]}  → {info['file']}")
+        print("\nView a snapshot:  ci snapshots <platform>  (e.g. ci snapshots chatgpt)")
+        print("Or pass a URL:    ci snapshots https://chatgpt.com/...")
+        return
+
+    if target == '--generate':
+        # Manually trigger compaction snapshot
+        hook = Path(__file__).resolve().parent.parent / 'hooks' / 'precompact_snapshot.py'
+        if hook.exists():
+            import os
+            env = dict(os.environ)
+            env['CLAUDE_PROJECT_DIR'] = str(proj)
+            result = subprocess.run([sys.executable, '-I', str(hook)], env=env)
+            sys.exit(result.returncode)
+        else:
+            print("ERROR: precompact_snapshot.py not found")
+            sys.exit(1)
+
+    # Show a specific platform snapshot
+    if target not in _KNOWN_PLATFORMS:
+        print(f"Unknown platform: {target}")
+        print(f"Known: {', '.join(_KNOWN_PLATFORMS)}")
+        sys.exit(1)
+
+    snap_file = ctx / f'compaction-{target}.md'
+    if not snap_file.exists():
+        print(f"No snapshot for '{target}' yet.")
+        print("Snapshots are created automatically when sessions hit context limits.")
+        print("Create one now: ci snapshots --generate")
+        sys.exit(1)
+
+    print(snap_file.read_text())
 
 
 def cmd_surgical_test(proj: Path, args: list) -> None:

@@ -1,125 +1,290 @@
 """
 PreCompact hook — precompact_snapshot.py
-Before context window summarisation, writes a full session snapshot to:
-  - context/session-snapshot.md  (overwritten — always the latest)
-  - prepends a summary block to context/handoff.md
-Then syncs SQLite.
-Fails open on all errors.
+Fires when the LLM is approaching its context window limit (Claude Code: PreCompact event).
+Creates a structured handoff snapshot that any LLM can pick up from,
+and routes intelligently based on the LLM platform in use.
+
+Supported platforms (auto-detected from environment):
+  claude     — Claude Code / Claude.ai
+  chatgpt    — ChatGPT / OpenAI
+  gemini     — Google Gemini
+  copilot    — GitHub Copilot
+  cursor     — Cursor
+  windsurf   — Windsurf
+  generic    — any other LLM
 """
 import sys
 import os
-import subprocess
-from datetime import datetime
+import json
+import datetime
 
-def get_git_head(proj):
-    try:
-        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                           capture_output=True, text=True, cwd=proj)
-        return r.stdout.strip() if r.returncode == 0 else "unknown"
-    except Exception:
-        return "unknown"
+# Platform detection strings → canonical name
+_PLATFORM_HINTS = {
+    'CLAUDE_SESSION':       'claude',
+    'CLAUDE_PROJECT_DIR':   'claude',
+    'OPENAI_SESSION':       'chatgpt',
+    'COPILOT_SESSION':      'copilot',
+    'CURSOR_SESSION':       'cursor',
+    'WINDSURF_SESSION':     'windsurf',
+    'GEMINI_SESSION':       'gemini',
+}
 
-def get_touched_files(proj):
-    try:
-        r = subprocess.run(["git", "diff", "--name-only", "HEAD"],
-                           capture_output=True, text=True, cwd=proj)
-        s = subprocess.run(["git", "diff", "--cached", "--name-only"],
-                           capture_output=True, text=True, cwd=proj)
-        files = list(set((r.stdout + s.stdout).strip().splitlines()))
-        return files if files else ["(none — no uncommitted changes)"]
-    except Exception:
-        return ["(git unavailable)"]
+# Per-platform: where to point the user and what paste format to use
+_PLATFORM_PROFILES = {
+    'claude': {
+        'name': 'Claude',
+        'snapshot_url_hint': 'claude.ai/project or Claude Code — paste snapshot as first message',
+        'supports_projects': True,
+        'memory_branch': True,      # can use Mode A git branch memory
+        'system_prompt_note': 'Paste adapters/cloud-llm/SYSTEM_PROMPT_UNIVERSAL.md as project instructions',
+    },
+    'chatgpt': {
+        'name': 'ChatGPT',
+        'snapshot_url_hint': 'chatgpt.com — paste snapshot as first message in a new chat, or use a Project',
+        'supports_projects': True,   # ChatGPT Projects support custom instructions
+        'memory_branch': False,
+        'system_prompt_note': 'Paste adapters/cloud-llm/SYSTEM_PROMPT_UNIVERSAL.md into Custom Instructions',
+    },
+    'gemini': {
+        'name': 'Gemini',
+        'snapshot_url_hint': 'gemini.google.com — paste snapshot as first message',
+        'supports_projects': False,
+        'memory_branch': False,
+        'system_prompt_note': 'Paste adapters/cloud-llm/SYSTEM_PROMPT_UNIVERSAL.md as first system message',
+    },
+    'copilot': {
+        'name': 'GitHub Copilot',
+        'snapshot_url_hint': 'github.com/copilot — paste snapshot in the chat; repo is already connected',
+        'supports_projects': False,
+        'memory_branch': True,      # Copilot has repo access
+        'system_prompt_note': 'Repo access available — Mode A (git branch memory) applies',
+    },
+    'cursor': {
+        'name': 'Cursor',
+        'snapshot_url_hint': 'Cursor AI chat — project folder is already connected (Mode B)',
+        'supports_projects': True,
+        'memory_branch': False,
+        'system_prompt_note': 'Local folder connected — Mode B (native) applies. Paste snapshot if starting new chat.',
+    },
+    'windsurf': {
+        'name': 'Windsurf',
+        'snapshot_url_hint': 'Windsurf chat — project folder is already connected (Mode B)',
+        'supports_projects': True,
+        'memory_branch': False,
+        'system_prompt_note': 'Local folder connected — Mode B (native) applies.',
+    },
+    'generic': {
+        'name': 'LLM',
+        'snapshot_url_hint': 'Paste snapshot at the start of your next session in any LLM chat window',
+        'supports_projects': False,
+        'memory_branch': False,
+        'system_prompt_note': 'Paste adapters/cloud-llm/SYSTEM_PROMPT_UNIVERSAL.md as system prompt',
+    },
+}
 
-def read_active_task(proj):
+
+def detect_platform() -> str:
+    for env_key, platform in _PLATFORM_HINTS.items():
+        if os.environ.get(env_key):
+            return platform
+    # Heuristic: check process name or TERM_PROGRAM
+    term = os.environ.get('TERM_PROGRAM', '').lower()
+    if 'cursor' in term:
+        return 'cursor'
+    if 'windsurf' in term:
+        return 'windsurf'
+    # Default — most installs are Claude Code
+    return 'claude'
+
+
+def _read(path: str, max_chars: int = 800) -> str:
     try:
-        path = os.path.join(proj, "context", "current-task.md")
-        with open(path, encoding="utf-8") as f:
-            lines = f.readlines()
-        in_section = False
-        result = []
-        for line in lines:
-            if line.strip() == "## Active Task":
-                in_section = True
-                continue
-            if in_section:
-                if line.startswith("## ") and line.strip() != "## Active Task":
-                    break
-                result.append(line)
-        return "".join(result).strip() or "(no active task)"
+        with open(path, encoding='utf-8') as f:
+            return f.read(max_chars)
     except Exception:
-        return "(current-task.md unavailable)"
+        return ''
+
+
+def build_snapshot(proj: str, platform: str) -> dict:
+    """Build a structured context snapshot dict."""
+    ctx = os.path.join(proj, 'context')
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+    overview   = _read(os.path.join(ctx, 'overview.md'), 600)
+    current    = _read(os.path.join(ctx, 'current-task.md'), 400)
+    handoff    = _read(os.path.join(ctx, 'handoff.md'), 400)
+    constraints = _read(os.path.join(ctx, 'constraints.md'), 300)
+    problems   = _read(os.path.join(ctx, 'known-problems.md'), 300)
+
+    profile = _PLATFORM_PROFILES.get(platform, _PLATFORM_PROFILES['generic'])
+
+    return {
+        'platform': platform,
+        'platform_name': profile['name'],
+        'snapshot_at': ts,
+        'project': os.path.basename(proj),
+        'project_path': proj,
+        'overview': overview,
+        'current_task': current,
+        'last_handoff': handoff,
+        'constraints': constraints,
+        'known_problems': problems,
+        'continuation': {
+            'url_hint': profile['snapshot_url_hint'],
+            'system_prompt_note': profile['system_prompt_note'],
+            'memory_branch': profile['memory_branch'],
+        },
+    }
+
+
+def write_snapshot(proj: str, snapshot: dict, platform: str) -> str:
+    """Write snapshot to context/compaction-<platform>.md and return the path."""
+    ctx = os.path.join(proj, 'context')
+    os.makedirs(ctx, exist_ok=True)
+
+    profile = _PLATFORM_PROFILES.get(platform, _PLATFORM_PROFILES['generic'])
+    path = os.path.join(ctx, f'compaction-{platform}.md')
+
+    lines = [
+        f'# Compaction Snapshot — {profile["name"]}',
+        f'**Created:** {snapshot["snapshot_at"]}  ',
+        f'**Project:** {snapshot["project"]}',
+        '',
+        '> This file was auto-generated when the session approached its context limit.',
+        '> Paste it (or the text below) at the start of your next chat to restore context.',
+        '',
+        '---',
+        '',
+        '## How to Continue',
+        '',
+        f'**Platform:** {profile["name"]}',
+        f'**Where:** {profile["snapshot_url_hint"]}',
+        f'**System prompt:** {profile["system_prompt_note"]}',
+        '',
+    ]
+
+    if profile['memory_branch']:
+        lines += [
+            '**Memory branch available:** Yes — the LLM can read `ci/memory/main` from your repo.',
+            '',
+        ]
+
+    lines += [
+        '---',
+        '',
+        '## Paste This Block Into Your Next Session',
+        '',
+        '```',
+        '=== CI CONTEXT SNAPSHOT ===',
+        f'Project: {snapshot["project"]}',
+        f'Captured: {snapshot["snapshot_at"]}',
+        f'Platform: {snapshot["platform_name"]}',
+        '',
+    ]
+
+    if snapshot['current_task'].strip():
+        lines.append('--- Current Task ---')
+        lines.append(snapshot['current_task'].strip()[:400])
+        lines.append('')
+
+    if snapshot['last_handoff'].strip():
+        lines.append('--- Last Handoff ---')
+        lines.append(snapshot['last_handoff'].strip()[:400])
+        lines.append('')
+
+    if snapshot['overview'].strip():
+        lines.append('--- Project Overview ---')
+        lines.append(snapshot['overview'].strip()[:400])
+        lines.append('')
+
+    if snapshot['constraints'].strip():
+        lines.append('--- Constraints ---')
+        lines.append(snapshot['constraints'].strip()[:200])
+        lines.append('')
+
+    if snapshot['known_problems'].strip():
+        lines.append('--- Known Problems ---')
+        lines.append(snapshot['known_problems'].strip()[:200])
+        lines.append('')
+
+    lines += [
+        '=== END CI CONTEXT SNAPSHOT ===',
+        '```',
+        '',
+        '---',
+        '',
+        '## Raw Context Files',
+        '',
+        '### context/current-task.md',
+        '```',
+        snapshot['current_task'][:600] or '(empty)',
+        '```',
+        '',
+        '### context/handoff.md',
+        '```',
+        snapshot['last_handoff'][:600] or '(empty)',
+        '```',
+    ]
+
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+    return path
+
+
+def write_json_index(proj: str, platforms_written: list) -> None:
+    """Write .ai/compaction-index.json so ci can quickly list all snapshots."""
+    index_path = os.path.join(proj, '.ai', 'compaction-index.json')
+    ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        existing = {}
+        if os.path.exists(index_path):
+            with open(index_path, encoding='utf-8') as f:
+                existing = json.load(f)
+    except Exception:
+        existing = {}
+
+    for p in platforms_written:
+        existing[p] = {
+            'platform': p,
+            'file': f'context/compaction-{p}.md',
+            'updated': ts,
+        }
+
+    with open(index_path, 'w', encoding='utf-8') as f:
+        json.dump(existing, f, indent=2)
+
 
 def main():
     try:
-        proj = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        head = get_git_head(proj)
-        touched = get_touched_files(proj)
-        active_task = read_active_task(proj)
+        proj = os.environ.get('CLAUDE_PROJECT_DIR', os.getcwd())
+        platform = detect_platform()
 
-        snapshot = f"""# Session Snapshot — {now}
+        snapshot = build_snapshot(proj, platform)
 
-**Git HEAD:** `{head}`
-**Triggered by:** PreCompact (context window about to be summarised)
+        # Always write for detected platform
+        platforms_written = [platform]
+        write_snapshot(proj, snapshot, platform)
 
-## Active Task
-{active_task}
+        # Also write a generic snapshot that any LLM can use
+        if platform != 'generic':
+            generic_snap = dict(snapshot)
+            generic_snap['platform'] = 'generic'
+            write_snapshot(proj, generic_snap, 'generic')
+            platforms_written.append('generic')
 
-## Files Touched This Session
-{chr(10).join(f'- {f}' for f in touched)}
+        write_json_index(proj, platforms_written)
 
-## Context
-This snapshot was auto-written before context summarisation.
-If you are reading this in a new session or after a compact, treat this as
-the highest-priority recovery document — it captures the exact mid-session state.
-
-Load order after a compact:
-1. This file (session-snapshot.md)
-2. context/handoff.md (newest block)
-3. context/current-task.md
-4. context/realignment.md
-5. Target context docs for the active task area
-
-## Open Work
-(Populated manually via /task-done or /handoff — check handoff.md for details)
-"""
-
-        # Overwrite session-snapshot.md
-        snap_path = os.path.join(proj, "context", "session-snapshot.md")
-        with open(snap_path, "w", encoding="utf-8") as f:
-            f.write(snapshot)
-
-        # Prepend summary block to handoff.md
-        handoff_path = os.path.join(proj, "context", "handoff.md")
-        block = f"""## Pre-Compact Snapshot — {now}
-
-**Git HEAD:** `{head}`
-**Files touched:** {', '.join(touched[:5])}{'...' if len(touched) > 5 else ''}
-**Active task:** {active_task[:100]}
-
-*(Auto-written by PreCompact hook — full snapshot in context/session-snapshot.md)*
-
----
-
-"""
-        if os.path.exists(handoff_path):
-            with open(handoff_path, encoding="utf-8") as f:
-                existing = f.read()
-            with open(handoff_path, "w", encoding="utf-8") as f:
-                f.write(block + existing)
-        else:
-            with open(handoff_path, "w", encoding="utf-8") as f:
-                f.write(block)
-
-        # Sync SQLite
-        sync_script = os.path.join(proj, ".ai", "sync_context.py")
-        if os.path.exists(sync_script):
-            subprocess.run([sys.executable, sync_script], cwd=proj, capture_output=True)
+        print(f'\n[precompact] Context snapshot saved for {_PLATFORM_PROFILES[platform]["name"]}')
+        print(f'  → context/compaction-{platform}.md')
+        print('  → context/compaction-generic.md')
+        print('\nTo continue in any LLM: paste the snapshot block from either file.')
+        print(f'Where: {_PLATFORM_PROFILES[platform]["snapshot_url_hint"]}')
 
     except Exception as e:
-        print(f"[precompact_snapshot] warning: {e}", file=sys.stderr)
+        print(f'[precompact] warning: {e}', file=sys.stderr)
+        sys.exit(0)
 
-    sys.exit(0)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -1,70 +1,123 @@
 # Cloud LLM Adapter
 
-Use this intelligence system with any cloud LLM chat window — Claude.ai, ChatGPT, Gemini, etc. —
-in three modes depending on what access the LLM has.
+Use this intelligence system with any cloud LLM chat window — Claude.ai, ChatGPT, Gemini, etc.
 
 ---
 
-## Mode A — Repo Access (recommended)
+## Setup (all modes)
 
-**When to use:** The LLM has been given access to a GitHub/GitLab repo
-(e.g. Claude Projects with a connected repo, GPT with a repo tool, etc.)
+Paste **one** file into your LLM's system prompt or project instructions:
 
-**How it works:**
-- The LLM creates a branch `ci/memory/<date>` for each session
-- Context docs are committed to that branch
-- Pull requests merge memory back to main
-- The intelligence system reads branches via the repo
+```
+adapters/cloud-llm/SYSTEM_PROMPT_UNIVERSAL.md
+```
 
-**Setup:**
-1. Connect your repo to the LLM (e.g. in Claude.ai → Projects → Add repo)
-2. Copy `adapters/cloud-llm/SYSTEM_PROMPT_REPO.md` into your LLM system prompt or project instructions
-3. On first use, the LLM will create the `ci/memory/` branch structure automatically
+That's it. The prompt auto-detects which mode it is running in at the start of each session.
+
+---
+
+## How Auto-Detection Works
+
+The LLM checks for access in this order every session:
+
+```
+1. Can I read local files?  →  Mode B (Native)   — full direct access
+2. Can I access the repo?   →  Mode A (Remote)    — git branch memory
+3. Neither?                 →  Mode C (Snapshot)  — clipboard workflow
+
+If BOTH 1 and 2 succeed    →  Dual mode: local primary + repo backup
+```
+
+The LLM announces which mode it detected at the start of every session. If it gets it wrong,
+tell it and it will switch.
+
+---
+
+## Mode B — Native (Local Folder Access)
+
+**For:** Claude Code, Claude Desktop with folder connected, Cursor, Windsurf, etc.
+
+- LLM reads/writes `context/*.md` directly
+- Hooks fire automatically (no extra setup beyond `ci install`)
+- Full `ci` commands available in terminal
+
+**The hook confirms detection:**
+```
+[Mode B: Native — local file access confirmed]
+  Project:  /path/to/your-project
+  context/: ✓
+  knowledge.db: ✓
+```
+
+**No extra configuration.** Just `ci install` in the project, then open the project in your LLM.
+
+---
+
+## Mode A — Remote (Repo Access)
+
+**For:** Claude.ai Projects with GitHub connected, GPT with a repo tool, etc.
+
+- LLM creates `ci/memory/YYYY-MM-DD` branches per session
+- Reads context from `ci/memory/main` at session start
+- PRs memory back to main at session end
+
+**Optional: set up branches manually first:**
+```bash
+sh adapters/cloud-llm/memory_branch.sh setup   # creates ci/memory/main
+sh adapters/cloud-llm/memory_branch.sh status  # list memory branches
+```
 
 **Branch naming:**
 ```
-ci/memory/YYYY-MM-DD/<session-id>    # session working branch
-ci/memory/main                        # merged long-term memory
+ci/memory/main              — long-term merged memory
+ci/memory/YYYY-MM-DD        — today's session branch
+ci/memory/YYYY-MM-DD-2      — second session same day
 ```
 
 ---
 
-## Mode B — Local Folder Access
+## Mode C — Cloud Only (No Access)
 
-**When to use:** The LLM can read/write files on your machine
-(e.g. Claude Code, Claude Desktop with a connected folder, Cursor, Windsurf, etc.)
+**For:** Bare chat windows with no file or repo access (Claude.ai, ChatGPT, etc.)
 
-**How it works:**
-- The LLM reads `context/*.md` files directly
-- Writes happen in-place (no branching needed)
-- Full intelligence system available via `ci` commands
+The universal prompt enforces this protocol automatically:
 
-**Setup:**
-1. Open your project folder in the LLM app
-2. Run `ci install` in the project root (see INSTALL.md)
-3. The LLM automatically reads context docs at session start (via hooks)
+1. **Every session start** — LLM asks for the snapshot if not pasted
+2. **You run** `ci export-context` in your terminal and paste the output
+3. **LLM confirms:** `"Loaded context: [project] — last session [date]"`
+4. **Every session end** — LLM outputs an updated snapshot block (no exceptions)
+5. **You save** the snapshot for next session
 
-**No extra configuration needed** — this is the full native mode.
-
----
-
-## Mode C — Cloud Only (no local/repo access)
-
-**When to use:** Purely a chat window — no file access, no repo connected.
-
-**How it works:**
-- Paste a condensed project snapshot into the system prompt / first message
-- The LLM maintains memory in the conversation thread
-- You export memory at the end of the session and paste it back next time
-
-**Setup:**
-1. Run `ci export-context` in your terminal — this generates a compact text block
-2. Paste the output at the start of your LLM conversation
-3. At the end, ask the LLM: "export memory" to get the updated block
-4. Save that block and paste it next session
-
-**Generate a cloud context snapshot:**
 ```bash
-ci export-context           # prints compact context for pasting
-ci export-context --file    # writes to .ai/cloud-context.txt
+# Generate snapshot
+ci export-context
+
+# Write to file instead
+ci export-context --file    # → .ai/cloud-context.txt
 ```
+
+The universal prompt enforces the session-end snapshot even if you don't ask for it —
+context will not silently be lost.
+
+---
+
+## Dual Mode (Both Local + Repo)
+
+If your LLM has both local folder access AND repo access (e.g. Claude Code with GitHub connected):
+
+- **Reads/writes:** local files (faster, atomic)
+- **Backup:** session context also committed to `ci/memory/YYYY-MM-DD` branch
+- **Result:** local speed + full git history of every session
+
+The universal prompt handles this automatically.
+
+---
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `SYSTEM_PROMPT_UNIVERSAL.md` | Single prompt — paste this, covers all modes |
+| `SYSTEM_PROMPT_REPO.md` | Legacy Mode A only prompt (still works) |
+| `SYSTEM_PROMPT_CLOUD_ONLY.md` | Legacy Mode C only prompt (still works) |
+| `memory_branch.sh` | Branch lifecycle helper for Mode A |

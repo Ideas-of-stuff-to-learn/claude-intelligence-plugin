@@ -7,10 +7,6 @@ Tests for new features:
 - pentest_runner pattern scanning works without external tools
 """
 import importlib.util
-import sys
-import os
-import json
-import tempfile
 from pathlib import Path
 import pytest
 
@@ -144,6 +140,7 @@ def test_export_context_to_file(cli, tmp_path):
 def test_cloud_llm_adapter_files_exist():
     base = Path(__file__).parent.parent / 'adapters' / 'cloud-llm'
     assert (base / 'README.md').exists()
+    assert (base / 'SYSTEM_PROMPT_UNIVERSAL.md').exists()
     assert (base / 'SYSTEM_PROMPT_REPO.md').exists()
     assert (base / 'SYSTEM_PROMPT_CLOUD_ONLY.md').exists()
     assert (base / 'memory_branch.sh').exists()
@@ -151,9 +148,31 @@ def test_cloud_llm_adapter_files_exist():
 
 def test_cloud_llm_readme_has_three_modes():
     readme = (Path(__file__).parent.parent / 'adapters' / 'cloud-llm' / 'README.md').read_text()
-    assert 'Mode A' in readme
+    assert 'Mode A' in readme or 'Mode A' in readme
     assert 'Mode B' in readme
     assert 'Mode C' in readme
+
+
+def test_universal_prompt_has_all_modes():
+    """Universal prompt must cover all four cases including dual mode."""
+    prompt = (
+        Path(__file__).parent.parent / 'adapters' / 'cloud-llm' / 'SYSTEM_PROMPT_UNIVERSAL.md'
+    ).read_text()
+    assert 'Mode B' in prompt, "Universal prompt must cover native/local mode"
+    assert 'Mode A' in prompt, "Universal prompt must cover remote/repo mode"
+    assert 'Mode C' in prompt, "Universal prompt must cover cloud-only mode"
+    assert 'Dual' in prompt or 'dual' in prompt, "Universal prompt must handle both-connected case"
+    assert 'auto' in prompt.lower() or 'detect' in prompt.lower(), \
+        "Universal prompt must describe auto-detection"
+
+
+def test_universal_prompt_mode_c_enforces_snapshot():
+    """Mode C section must include enforcement language — snapshot at end of every session."""
+    prompt = (
+        Path(__file__).parent.parent / 'adapters' / 'cloud-llm' / 'SYSTEM_PROMPT_UNIVERSAL.md'
+    ).read_text()
+    assert 'NO EXCEPTIONS' in prompt or 'MUST' in prompt, \
+        "Mode C must enforce session-end snapshot output"
 
 
 # ── Dashboard security API ───────────────────────────────────────────────────
