@@ -255,6 +255,78 @@ def write_json_index(proj: str, platforms_written: list) -> None:
         json.dump(existing, f, indent=2)
 
 
+def _try_gist_push(proj: str, platform: str) -> str:
+    """Push generic snapshot to GitHub Gist. Returns URL or empty string on failure."""
+    import urllib.request
+    import urllib.error
+
+    generic_file = os.path.join(proj, 'context', 'compaction-generic.md')
+    if not os.path.exists(generic_file):
+        return ''
+    content = open(generic_file, encoding='utf-8').read()
+
+    gist_id_file = os.path.join(os.path.expanduser('~'), '.claude-intel', 'gist-id')
+    gist_id = open(gist_id_file).read().strip() if os.path.exists(gist_id_file) else None
+
+    proj_name = os.path.basename(proj)
+
+    # Try gh CLI first (handles SSO/2FA/proxy transparently)
+    try:
+        import subprocess
+        if gist_id:
+            r = subprocess.run(
+                ['gh', 'gist', 'edit', gist_id, '--filename', 'ci-context.md'],
+                input=content, text=True, capture_output=True, timeout=10
+            )
+            if r.returncode == 0:
+                return f'https://gist.github.com/{gist_id}'
+        r = subprocess.run(
+            ['gh', 'gist', 'create', '--secret',
+             '--desc', f'CI context snapshot — {proj_name}',
+             '--filename', 'ci-context.md'],
+            input=content, text=True, capture_output=True, timeout=10
+        )
+        if r.returncode == 0:
+            url = r.stdout.strip()
+            new_id = url.split('/')[-1]
+            os.makedirs(os.path.dirname(gist_id_file), exist_ok=True)
+            open(gist_id_file, 'w').write(new_id)
+            return url
+    except Exception:
+        pass
+
+    # Fallback: GITHUB_TOKEN env var
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    if not token:
+        return ''
+
+    payload = json.dumps({
+        'description': f'CI context snapshot — {proj_name}',
+        'public': False,
+        'files': {'ci-context.md': {'content': content}},
+    }).encode()
+    headers = {
+        'Authorization': f'token {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/vnd.github+json',
+    }
+    try:
+        if gist_id:
+            req = urllib.request.Request(f'https://api.github.com/gists/{gist_id}',
+                                         data=payload, headers=headers, method='PATCH')
+        else:
+            req = urllib.request.Request('https://api.github.com/gists',
+                                         data=payload, headers=headers, method='POST')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        url = data['html_url']
+        os.makedirs(os.path.dirname(gist_id_file), exist_ok=True)
+        open(gist_id_file, 'w').write(data['id'])
+        return url
+    except Exception:
+        return ''
+
+
 def main():
     try:
         proj = os.environ.get('CLAUDE_PROJECT_DIR', os.getcwd())
@@ -262,11 +334,9 @@ def main():
 
         snapshot = build_snapshot(proj, platform)
 
-        # Always write for detected platform
         platforms_written = [platform]
         write_snapshot(proj, snapshot, platform)
 
-        # Also write a generic snapshot that any LLM can use
         if platform != 'generic':
             generic_snap = dict(snapshot)
             generic_snap['platform'] = 'generic'
@@ -275,11 +345,18 @@ def main():
 
         write_json_index(proj, platforms_written)
 
-        print(f'\n[precompact] Context snapshot saved for {_PLATFORM_PROFILES[platform]["name"]}')
+        print(f'\n[precompact] Snapshot saved — {_PLATFORM_PROFILES[platform]["name"]}')
         print(f'  → context/compaction-{platform}.md')
         print('  → context/compaction-generic.md')
-        print('\nTo continue in any LLM: paste the snapshot block from either file.')
-        print(f'Where: {_PLATFORM_PROFILES[platform]["snapshot_url_hint"]}')
+
+        # Auto-push to Gist so Mode C LLMs can fetch it without manual paste
+        gist_url = _try_gist_push(proj, platform)
+        if gist_url:
+            print(f'\n  ✓ Pushed to GitHub Gist: {gist_url}')
+            print('  Paste this URL at the start of your next session — the LLM fetches it automatically.')
+        else:
+            print('\n  To enable auto-sync: install gh CLI → gh auth login')
+            print('  Or set GITHUB_TOKEN and re-run: ci snapshots --push')
 
     except Exception as e:
         print(f'[precompact] warning: {e}', file=sys.stderr)

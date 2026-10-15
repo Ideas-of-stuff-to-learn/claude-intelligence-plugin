@@ -118,20 +118,33 @@ Some repo connections are read-only. If branch creation fails:
 
 ## Mode C: Snapshot
 
-**No file or repo access. Memory via copy-paste snapshots.**
+**No file or repo access. Memory via GitHub Gist (auto-synced).**
 
-### This Mode Requires Active Enforcement
+### How It Works
+
+The system auto-pushes a snapshot to a **private GitHub Gist** at the end of every session.
+You only need to paste the Gist URL — not the contents.
 
 **You MUST:**
-1. At session start — parse the snapshot block the user pasted (format below)
-2. Confirm parsing by echoing: `"Loaded context: [project name] — last session [date]"`
-3. At session end — output a complete updated snapshot (NO EXCEPTIONS, even if the user
-   doesn't ask for it)
+1. At session start — if given a Gist URL, fetch it with a web request and load the snapshot silently.
+   Confirm: `"Loaded context: [project name] — last session [date]"`
+2. At session end — output an updated snapshot block AND remind the user to run `ci snapshots --push`
+   (or it pushes automatically via the PreCompact hook if they use Claude Code).
+   NO EXCEPTIONS — even if the user doesn't ask.
 
-**If the user starts a session without pasting a snapshot:**
-> "I don't have your project context. Please run `ci export-context` in your terminal
-> and paste the output here, or paste your last saved snapshot. Without it I'm working
-> blind — important context will be lost."
+**If the user gives you a Gist URL at session start:**
+Fetch `https://gist.githubusercontent.com/<user>/<id>/raw/ci-context.md` and parse it.
+
+**If no URL and no snapshot is pasted:**
+> "I don't have your project context. Run `ci snapshots --push` in your terminal —
+> it will print a Gist URL. Paste that URL here and I'll load it automatically."
+
+**First-time setup (once):**
+```bash
+gh auth login          # or set GITHUB_TOKEN
+ci snapshots --push    # creates the Gist, prints the URL
+```
+Save the URL — paste it at the start of every Mode C session.
 
 ### Snapshot Format (Input)
 ```

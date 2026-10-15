@@ -952,10 +952,100 @@ COMMANDS
         sys.exit(1)
 
 
+def _gist_push(proj: Path, platform: str = 'generic') -> str:
+    """Push snapshot to a GitHub Gist. Returns the gist URL."""
+    import urllib.request
+    import urllib.error
+
+    snap_file = proj / 'context' / f'compaction-{platform}.md'
+    generic_file = proj / 'context' / 'compaction-generic.md'
+    content = ''
+    if snap_file.exists():
+        content = snap_file.read_text()
+    elif generic_file.exists():
+        content = generic_file.read_text()
+    else:
+        raise FileNotFoundError('No snapshot file found. Run: ci snapshots --generate')
+
+    # Load stored gist ID (so we update instead of creating duplicates)
+    gist_id_file = Path.home() / '.claude-intel' / 'gist-id'
+    gist_id = gist_id_file.read_text().strip() if gist_id_file.exists() else None
+
+    # Prefer gh CLI (handles auth automatically, works with SSO/2FA/proxy)
+    try:
+        result = subprocess.run(['gh', '--version'], capture_output=True)
+        if result.returncode == 0:
+            if gist_id:
+                # Update existing gist
+                r = subprocess.run(
+                    ['gh', 'gist', 'edit', gist_id, '--filename', 'ci-context.md',
+                     '--desc', f'CI context snapshot — {proj.name}'],
+                    input=content, text=True, capture_output=True
+                )
+                if r.returncode == 0:
+                    url = f'https://gist.github.com/{gist_id}'
+                    return url
+            # Create new gist
+            r = subprocess.run(
+                ['gh', 'gist', 'create', '--secret',
+                 '--desc', f'CI context snapshot — {proj.name}',
+                 '--filename', 'ci-context.md'],
+                input=content, text=True, capture_output=True
+            )
+            if r.returncode == 0:
+                url = r.stdout.strip()
+                gist_id = url.split('/')[-1]
+                gist_id_file.parent.mkdir(parents=True, exist_ok=True)
+                gist_id_file.write_text(gist_id)
+                return url
+    except FileNotFoundError:
+        pass  # gh not installed — fall through to token method
+
+    # Fallback: GitHub API with token from env
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    if not token:
+        raise RuntimeError(
+            'No GitHub auth found.\n'
+            '  Option 1 (recommended): install gh CLI → https://cli.github.com then: gh auth login\n'
+            '  Option 2: set GITHUB_TOKEN=<your-token> in your shell\n'
+            '  Get a token: https://github.com/settings/tokens (scope: gist)'
+        )
+
+    payload = json.dumps({
+        'description': f'CI context snapshot — {proj.name}',
+        'public': False,
+        'files': {'ci-context.md': {'content': content}},
+    }).encode()
+
+    headers = {
+        'Authorization': f'token {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/vnd.github+json',
+    }
+
+    if gist_id:
+        req = urllib.request.Request(f'https://api.github.com/gists/{gist_id}',
+                                     data=payload, headers=headers, method='PATCH')
+    else:
+        req = urllib.request.Request('https://api.github.com/gists',
+                                     data=payload, headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        url = data['html_url']
+        new_id = data['id']
+        gist_id_file.parent.mkdir(parents=True, exist_ok=True)
+        gist_id_file.write_text(new_id)
+        return url
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f'GitHub API error {e.code}: {e.read().decode()[:200]}') from e
+
+
 def cmd_snapshots(proj: Path, args: list) -> None:
     """List compaction snapshots saved when sessions hit context limits.
 
     ci snapshots                  — list all saved snapshots
+    ci snapshots --push           — push snapshot to GitHub Gist (auto-persists for Mode C)
     ci snapshots claude           — show the Claude snapshot
     ci snapshots chatgpt          — show ChatGPT snapshot
     ci snapshots <url>            — detect platform from URL, show that snapshot
@@ -1002,10 +1092,8 @@ def cmd_snapshots(proj: Path, args: list) -> None:
         return
 
     if target == '--generate':
-        # Manually trigger compaction snapshot
         hook = Path(__file__).resolve().parent.parent / 'hooks' / 'precompact_snapshot.py'
         if hook.exists():
-            import os
             env = dict(os.environ)
             env['CLAUDE_PROJECT_DIR'] = str(proj)
             result = subprocess.run([sys.executable, '-I', str(hook)], env=env)
@@ -1013,6 +1101,19 @@ def cmd_snapshots(proj: Path, args: list) -> None:
         else:
             print("ERROR: precompact_snapshot.py not found")
             sys.exit(1)
+
+    if target == '--push':
+        try:
+            url = _gist_push(proj)
+            print('✓ Snapshot pushed to GitHub Gist')
+            print(f'  {url}')
+            print()
+            print('Share this URL with your next chat session.')
+            print('The LLM will fetch it automatically (Mode C in SYSTEM_PROMPT_UNIVERSAL.md).')
+        except Exception as e:
+            print(f'ERROR: {e}')
+            sys.exit(1)
+        return
 
     # Show a specific platform snapshot
     if target not in _KNOWN_PLATFORMS:

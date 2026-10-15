@@ -17,77 +17,11 @@ irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligenc
 powershell -Command "irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 | iex"
 ```
 
-Restart your terminal, then in any project:
+> **Blocked?** See [Firewall / Corporate Network](#firewall--corporate-network) at the bottom.
+
+Restart terminal, then in any project:
 ```bash
 cii
-```
-
----
-
-## Firewall / Corporate Network Fixes
-
-### curl blocked (Linux / macOS / WSL)
-```bash
-# Set proxy first, then install
-export https_proxy=http://your-proxy:port
-curl -fsSL .../install.sh | sh
-
-# Or skip curl entirely — clone directly
-git clone https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin ~/.claude-intel
-sh ~/.claude-intel/install.sh
-```
-
-### PowerShell execution policy blocked
-```powershell
-# Bypass for current session only (no permanent change)
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-irm .../install.ps1 | iex
-```
-
-### Corporate proxy (Windows)
-```powershell
-# The installer auto-reads your system proxy.
-# If it still fails, set it explicitly:
-$env:HTTPS_PROXY = "http://your-proxy:port"
-irm .../install.ps1 | iex
-```
-
-### Windows Defender / SmartScreen blocks the download
-The installer runs `Unblock-File` automatically. If Defender still flags it:
-1. Add an exclusion: **Windows Security → Virus & threat protection → Exclusions → Add folder → `%USERPROFILE%\.claude-intel`**
-2. Or install manually (see below)
-
-### Corporate SSL inspection (MITM certificate)
-```bash
-# Linux/macOS — point git at your corporate CA bundle
-git config --global http.sslCAInfo /path/to/corporate-ca.crt
-
-# Windows — import the cert into Windows cert store, then git picks it up automatically
-```
-
-### github.com is blocked entirely — manual install
-```bash
-# On a machine with access, download the zip:
-# https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/archive/refs/heads/main.zip
-# Transfer it, then:
-unzip main.zip
-mv claude-intelligence-plugin-main ~/.claude-intel
-sh ~/.claude-intel/install.sh
-```
-
-### macOS Gatekeeper blocks execution
-```bash
-# The installer removes the quarantine flag automatically.
-# If you still see "cannot be opened because the developer cannot be verified":
-xattr -dr com.apple.quarantine ~/.claude-intel
-```
-
-### SELinux / AppArmor (Linux)
-```bash
-# If ci is blocked by SELinux, restore default context:
-restorecon -v ~/.claude-intel/ci
-# Or run with python directly as a fallback:
-python3 ~/.claude-intel/.ai/intelligence_cli.py install
 ```
 
 ---
@@ -101,8 +35,16 @@ Auto-detects mode every session:
 |------|-----------|--------------|
 | **Native** | Local folder connected (Claude Code, Cursor, Windsurf) | Hooks fire automatically |
 | **Remote** | Repo connected, no local folder | LLM uses git memory branches |
-| **Cloud-only** | No folder, no repo | LLM enforces snapshot handoff each session |
+| **Cloud-only** | No folder, no repo | Snapshot auto-synced via GitHub Gist |
 | **Dual** | Both connected | Local primary, repo as backup |
+
+**Mode C (cloud-only) setup — once:**
+```bash
+gh auth login           # or: export GITHUB_TOKEN=<token>
+ci snapshots --push     # creates a private Gist, prints the URL
+```
+Paste that URL at the start of any cloud session — the LLM fetches it automatically.
+After each session it reminds you to push; or the hook pushes it for you in Claude Code.
 
 ---
 
@@ -117,20 +59,21 @@ ci health
 ## Commands
 
 ```
-ci install / cii    enable in project (new or existing)
-ci health           check everything
-ci dashboard        web dashboard :7654
-ci rebuild          refresh index
-ci test             surgical tests (changed files only)
-ci test --all       full suite
-ci pentest source . security scan
-ci pentest web URL  OWASP scan
-ci snapshots        list session-limit snapshots
-ci snapshots <llm>  show snapshot for claude/chatgpt/gemini/...
-ci snapshots URL    detect platform from URL
-ci export-context   snapshot for manual paste
-ci search <term>    search knowledge index
-ci sync             sync context docs
+cii / ci install        enable in project (new or existing)
+ci health               check everything
+ci dashboard            web dashboard :7654
+ci rebuild              refresh index
+ci test                 surgical tests (changed files only)
+ci test --all           full suite
+ci pentest source .     security scan
+ci pentest web URL      OWASP scan
+ci snapshots            list session-limit snapshots
+ci snapshots --push     push snapshot to GitHub Gist (Mode C)
+ci snapshots <llm>      show snapshot for claude/chatgpt/gemini/...
+ci snapshots URL        detect platform from URL
+ci export-context       snapshot for manual paste
+ci search <term>        search knowledge index
+ci sync                 sync context docs
 ```
 
 ---
@@ -139,19 +82,28 @@ ci sync             sync context docs
 
 | Problem | Fix |
 |---------|-----|
-| `ci: not found` after install | Restart terminal |
+| `ci: not found` | Restart terminal |
 | `health: ISSUES` | `cii` again from project root |
 | No dashboard data | `ci rebuild` |
 | Port in use | `ci dashboard 8080` |
-| WSL: "cannot execute" | Re-run `sh ~/.claude-intel/install.sh` (fixes CRLF) |
-| Windows: `cii` not found | Restart terminal; PATH set for new sessions only |
-| Defender flags ci.bat | Add `%USERPROFILE%\.claude-intel` to exclusions |
+| WSL: "cannot execute" | Re-run the bash installer |
+| Defender flags ci.bat | Add `%USERPROFILE%\.claude-intel` to Defender exclusions |
 
 **Requirements:** Python 3.8+, Git 2.20+
 
-**Uninstall:**
-```bash
-rm -rf ~/.claude-intel          # global (Unix)
-rmdir /s %USERPROFILE%\.claude-intel   # global (Windows CMD)
-rm -rf .ai .claude/hooks        # project only
-```
+**Uninstall:** `rm -rf ~/.claude-intel .ai .claude/hooks`
+
+---
+
+## Firewall / Corporate Network
+
+| Problem | Fix |
+|---------|-----|
+| `curl` blocked | `export https_proxy=http://proxy:port` then re-run |
+| PowerShell policy | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first |
+| Corporate proxy (Windows) | Installer reads system proxy automatically; if still failing: `$env:HTTPS_PROXY="http://proxy:port"` |
+| Defender / SmartScreen | Installer runs `Unblock-File` automatically; if still blocked add `%USERPROFILE%\.claude-intel` to exclusions |
+| MITM SSL cert | `git config --global http.sslCAInfo /path/to/corp-ca.crt` |
+| macOS Gatekeeper | Installer strips quarantine flag automatically |
+| SELinux | `restorecon -v ~/.claude-intel/ci` |
+| github.com fully blocked | Download zip: `github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/archive/refs/heads/main.zip` → extract to `~/.claude-intel` → re-run installer |
