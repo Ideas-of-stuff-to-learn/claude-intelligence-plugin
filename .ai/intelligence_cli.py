@@ -198,8 +198,16 @@ def cmd_dashboard(proj, port: int = 7654):
     print(f"Starting Intelligence Dashboard at http://localhost:{port}")
     print("Press Ctrl+C to stop.\n")
     try:
-        os.execv(sys.executable, [sys.executable, '-I', str(server_script),
-                                   str(proj), '--port', str(port)])
+        # os.execv on Windows fails when sys.executable contains spaces
+        # (e.g. C:\Program Files\Python313\python.exe).
+        # subprocess.run keeps the process alive and handles quoting correctly.
+        if sys.platform == 'win32':
+            import subprocess as _sp
+            _sp.run([sys.executable, '-I', str(server_script),
+                     str(proj), '--port', str(port)])
+        else:
+            os.execv(sys.executable, [sys.executable, '-I', str(server_script),
+                                       str(proj), '--port', str(port)])
     except KeyboardInterrupt:
         pass
 
@@ -1155,14 +1163,31 @@ def cmd_snapshots(proj: Path, args: list) -> None:
     if target == '--push':
         try:
             url = _gist_push(proj)
-            print('✓ Snapshot pushed to GitHub Gist')
+            print('✓ Snapshot pushed')
             print(f'  {url}')
             print()
-            print('Share this URL with your next chat session.')
-            print('The LLM will fetch it automatically (Mode C in SYSTEM_PROMPT_UNIVERSAL.md).')
-        except Exception as e:
-            print(f'ERROR: {e}')
-            sys.exit(1)
+            print('Paste that URL at the start of your next cloud LLM session.')
+            print('The LLM fetches your instructions and project context automatically.')
+        except Exception:
+            # All network paths failed — save locally so the user can paste the content
+            local_out = proj / '.ai' / 'ci-context-snapshot.md'
+            try:
+                content = _build_gist_content(proj)
+                local_out.write_text(content, encoding='utf-8')
+                print('Could not reach any upload service (network/firewall).')
+                print()
+                print('Snapshot saved locally:')
+                print(f'  {local_out}')
+                print()
+                print('To use it in a cloud LLM: open that file and paste its contents')
+                print('at the start of your session.')
+                print()
+                print('To enable auto-upload next time, choose one of:')
+                print('  gh auth login          (https://cli.github.com)')
+                print('  set GITHUB_TOKEN=<tok> (https://github.com/settings/tokens)')
+            except Exception as e2:
+                print(f'ERROR: {e2}')
+                sys.exit(1)
         return
 
     # Show a specific platform snapshot
