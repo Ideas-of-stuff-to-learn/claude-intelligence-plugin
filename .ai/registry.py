@@ -4,6 +4,8 @@ registry.py — Global project registry for the Claude intelligence plugin.
 Manages ~/.claude-intelligence/projects.json
 """
 import json
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,7 +26,11 @@ def _save(projects: List[Dict[str, Any]]) -> None:
     REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = REGISTRY_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(projects, indent=2, default=str), encoding="utf-8")
-    tmp.rename(REGISTRY_PATH)
+    # On Windows, os.replace() is atomic and overwrites; Path.rename() fails if target exists
+    if sys.platform == "win32":
+        os.replace(str(tmp), str(REGISTRY_PATH))
+    else:
+        tmp.rename(REGISTRY_PATH)
 
 
 def register_project(project_dir: str, project_name: Optional[str] = None) -> Dict[str, Any]:
