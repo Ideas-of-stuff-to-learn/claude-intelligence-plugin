@@ -1,3 +1,9 @@
-# Force CRLF for Windows scripts
+# Windows scripts — must have CRLF (PowerShell 5 / CMD requirement)
 install.ps1 text eol=crlf
-ci.bat text eol=crlf
+ci.bat      text eol=crlf
+
+# Unix shell scripts and Python — must have LF so WSL/bash can execute them
+ci          text eol=lf
+install.sh  text eol=lf
+*.py        text eol=lf
+*.sh        text eol=lf
