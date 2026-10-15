@@ -1,99 +1,147 @@
 #!/bin/sh
 # Claude Intelligence Plugin installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.sh | sh
+#
+# Firewall/proxy: if curl fails, set https_proxy first:
+#   export https_proxy=http://your-proxy:port
+#   curl -fsSL ... | sh
+# Or clone manually:
+#   git clone https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin ~/.claude-intel
+#   sh ~/.claude-intel/install.sh
 
 set -e
 
 REPO_URL="https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
 INSTALL_DIR="$HOME/.claude-intel"
 
-# Check for required tools
+# ── macOS: remove quarantine flag if running from a downloaded script ─────────
+if [ "$(uname)" = "Darwin" ]; then
+    xattr -d com.apple.quarantine "$0" 2>/dev/null || true
+fi
+
+# ── Check for required tools ──────────────────────────────────────────────────
 if ! command -v git >/dev/null 2>&1; then
-    echo "ERROR: git is required. Install git and try again."
+    echo "ERROR: git is required."
+    echo "  macOS:  brew install git   (or install Xcode Command Line Tools)"
+    echo "  Ubuntu: sudo apt install git"
+    echo "  Other:  https://git-scm.com/downloads"
     exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
-    echo "ERROR: Python 3 is required. Install Python 3 and try again."
+PYTHON=""
+for cmd in python3 python; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        ver=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
+        if [ "$ver" = "3" ]; then
+            PYTHON="$cmd"
+            break
+        fi
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    echo "ERROR: Python 3 is required."
+    echo "  macOS:  brew install python3"
+    echo "  Ubuntu: sudo apt install python3"
+    echo "  Other:  https://python.org/downloads"
     exit 1
 fi
 
-# Clone or update
-if [ -d "$INSTALL_DIR" ]; then
+# ── Clone or update ───────────────────────────────────────────────────────────
+if [ -d "$INSTALL_DIR/.git" ]; then
     existing_url=$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || echo "")
-    if echo "$existing_url" | grep -q "Ideas-of-stuff-to-learn/claude-intelligence-plugin"; then
+    if echo "$existing_url" | grep -q "claude-intelligence-plugin"; then
         echo "Updating existing installation..."
-        git -C "$INSTALL_DIR" pull
-        echo "✓ Updated ~/.claude-intel"
+        git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null || \
+            git -C "$INSTALL_DIR" fetch origin && git -C "$INSTALL_DIR" reset --hard origin/main
+        echo "✓ Updated $INSTALL_DIR"
     else
-        echo "WARNING: ~/.claude-intel exists but points to a different repo: $existing_url"
-        echo "Remove it manually and re-run this script."
+        echo "WARNING: $INSTALL_DIR exists but points to a different repo."
+        echo "Remove it and re-run: rm -rf $INSTALL_DIR"
         exit 1
     fi
+elif [ -d "$INSTALL_DIR" ]; then
+    # Directory exists but not a git repo — treat as stale, overwrite
+    echo "Removing stale $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"
+    git clone "$REPO_URL" "$INSTALL_DIR"
+    echo "✓ Cloned to $INSTALL_DIR"
 else
     echo "Cloning claude-intelligence-plugin..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
-    echo "✓ Cloned to ~/.claude-intel"
-fi
-
-# Rewrite the ci wrapper with guaranteed LF endings and the right python name.
-# We do this instead of relying on .gitattributes because git with
-# core.autocrlf=true (default on Windows) or WSL clones on NTFS can add \r
-# even when .gitattributes says eol=lf, causing "cannot execute: required
-# file not found" errors in bash.
-cat > "$INSTALL_DIR/ci" <<'CIWRAPPER'
-#!/bin/sh
-PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
-if command -v python3 >/dev/null 2>&1; then
-    exec python3 "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
-else
-    exec python "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"
-fi
-CIWRAPPER
-
-# Make ci executable
-chmod +x "$INSTALL_DIR/ci"
-echo "✓ Made ci executable"
-
-# Detect shell and add to PATH
-SHELL_NAME=$(basename "$SHELL")
-PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"'
-RC_FILE=""
-
-if [ "$SHELL_NAME" = "zsh" ] || [ -f "$HOME/.zshrc" ]; then
-    RC_FILE="$HOME/.zshrc"
-elif [ "$SHELL_NAME" = "bash" ] || [ -f "$HOME/.bashrc" ]; then
-    RC_FILE="$HOME/.bashrc"
-elif [ "$SHELL_NAME" = "fish" ] || [ -f "$HOME/.config/fish/config.fish" ]; then
-    RC_FILE="$HOME/.config/fish/config.fish"
-    PATH_LINE='set -gx PATH ~/.claude-intel $PATH'
-elif [ "$SHELL_NAME" = "nu" ] || [ "$SHELL_NAME" = "nushell" ] || [ -f "$HOME/.config/nushell/config.nu" ]; then
-    RC_FILE="$HOME/.config/nushell/config.nu"
-    PATH_LINE='$env.PATH = ($env.PATH | prepend ~/.claude-intel)'
-elif [ "$SHELL_NAME" = "tcsh" ] || [ "$SHELL_NAME" = "csh" ]; then
-    if [ -f "$HOME/.tcshrc" ]; then
-        RC_FILE="$HOME/.tcshrc"
-    else
-        RC_FILE="$HOME/.cshrc"
+    # Try HTTPS first; fall back with advice if blocked
+    if ! git clone "$REPO_URL" "$INSTALL_DIR" 2>/tmp/_ci_git_err; then
+        echo ""
+        echo "ERROR: git clone failed. Possible causes:"
+        echo "  • Firewall blocking github.com — set https_proxy and retry"
+        echo "  • Corporate SSL inspection — try: git config --global http.sslVerify false (ask IT first)"
+        echo "  • No internet — download the zip from github.com and extract to $INSTALL_DIR"
+        cat /tmp/_ci_git_err
+        exit 1
     fi
-    PATH_LINE='setenv PATH "$HOME/.claude-intel:$PATH"'
-elif [ "$SHELL_NAME" = "dash" ] || [ "$SHELL_NAME" = "sh" ]; then
-    RC_FILE="$HOME/.profile"
+    echo "✓ Cloned to $INSTALL_DIR"
+fi
+
+# ── Write ci wrapper (LF-only, no CRLF issues) ───────────────────────────────
+# Heredoc written via printf to guarantee LF endings even on systems where
+# git core.autocrlf=true would corrupt the file.
+printf '#!/bin/sh\nPLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"\nexec %s "$PLUGIN_DIR/.ai/intelligence_cli.py" "$@"\n' \
+    "$PYTHON" > "$INSTALL_DIR/ci"
+chmod +x "$INSTALL_DIR/ci"
+echo "✓ Created ci wrapper ($PYTHON)"
+
+# ── macOS: remove quarantine from installed files ────────────────────────────
+if [ "$(uname)" = "Darwin" ]; then
+    xattr -dr com.apple.quarantine "$INSTALL_DIR" 2>/dev/null || true
+fi
+
+# ── Detect shell rc and add PATH + alias ─────────────────────────────────────
+SHELL_NAME=$(basename "${SHELL:-sh}")
+RC_FILE=""
+ALIAS_LINE='alias cii="ci install"'
+
+case "$SHELL_NAME" in
+    zsh)   RC_FILE="$HOME/.zshrc"
+           PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
+    bash)  RC_FILE="$HOME/.bashrc"
+           PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
+    fish)  RC_FILE="$HOME/.config/fish/config.fish"
+           PATH_LINE='set -gx PATH ~/.claude-intel $PATH'
+           ALIAS_LINE='alias cii="ci install"' ;;
+    nu|nushell)
+           RC_FILE="$HOME/.config/nushell/config.nu"
+           PATH_LINE='$env.PATH = ($env.PATH | prepend ~/.claude-intel)'
+           ALIAS_LINE='alias cii = ci install' ;;
+    tcsh|csh)
+           RC_FILE="${HOME}/.tcshrc"
+           [ -f "$HOME/.cshrc" ] && RC_FILE="$HOME/.cshrc"
+           PATH_LINE='setenv PATH "$HOME/.claude-intel:$PATH"'
+           ALIAS_LINE='alias cii "ci install"' ;;
+    *)     # dash, sh, unknown — use .profile
+           RC_FILE="$HOME/.profile"
+           PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
+esac
+
+# Also check .bash_profile for login shells on macOS
+if [ "$SHELL_NAME" = "bash" ] && [ "$(uname)" = "Darwin" ] && [ -f "$HOME/.bash_profile" ]; then
+    RC_FILE="$HOME/.bash_profile"
 fi
 
 if [ -n "$RC_FILE" ]; then
     mkdir -p "$(dirname "$RC_FILE")"
-    if [ -f "$RC_FILE" ] && grep -qF ".claude-intel" "$RC_FILE"; then
-        echo "✓ PATH already set in $RC_FILE (skipping)"
+    if [ -f "$RC_FILE" ] && grep -qF ".claude-intel" "$RC_FILE" 2>/dev/null; then
+        echo "✓ PATH already in $RC_FILE"
     else
-        printf '\n# Claude Intelligence CLI\n%s\nalias cii="ci install"\n' "$PATH_LINE" >> "$RC_FILE"
-        echo "✓ Added to PATH in $RC_FILE"
+        printf '\n# Claude Intelligence CLI\n%s\n%s\n' "$PATH_LINE" "$ALIAS_LINE" >> "$RC_FILE"
+        echo "✓ Added PATH + alias to $RC_FILE"
     fi
 else
-    echo "Could not detect shell rc file."
-    echo "Add this line to your shell config manually:"
+    echo "Could not detect shell config. Add manually:"
     echo "  $PATH_LINE"
+    echo "  $ALIAS_LINE"
 fi
 
 echo ""
-echo "Restart your terminal, then run 'ci help' to see what you can do."
+echo "✓ Install complete"
+echo ""
+echo "  → Restart your terminal"
+echo "  → In any project: cii"
+echo ""
