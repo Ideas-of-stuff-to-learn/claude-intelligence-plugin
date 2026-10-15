@@ -51,8 +51,9 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     existing_url=$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || echo "")
     if echo "$existing_url" | grep -q "claude-intelligence-plugin"; then
         echo "Updating existing installation..."
-        git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null || \
+        if ! git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null; then
             git -C "$INSTALL_DIR" fetch origin && git -C "$INSTALL_DIR" reset --hard origin/main
+        fi
         echo "✓ Updated $INSTALL_DIR"
     else
         echo "WARNING: $INSTALL_DIR exists but points to a different repo."
@@ -104,8 +105,8 @@ case "$SHELL_NAME" in
     bash)  RC_FILE="$HOME/.bashrc"
            PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
     fish)  RC_FILE="$HOME/.config/fish/config.fish"
-           PATH_LINE='set -gx PATH ~/.claude-intel $PATH'
-           ALIAS_LINE='alias cii="ci install"' ;;
+           PATH_LINE='fish_add_path ~/.claude-intel'
+           ALIAS_LINE="alias cii='ci install'" ;;
     nu|nushell)
            RC_FILE="$HOME/.config/nushell/config.nu"
            PATH_LINE='$env.PATH = ($env.PATH | prepend ~/.claude-intel)'

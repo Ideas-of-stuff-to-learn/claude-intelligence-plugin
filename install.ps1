@@ -15,7 +15,14 @@
 
 # Bypass execution policy for this session (needed when AllSigned or Restricted is set)
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force 2>$null
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
+
+function Die([string]$msg) {
+    Write-Host ""
+    Write-Host "ERROR: $msg" -ForegroundColor Red
+    Write-Host ""
+    exit 1
+}
 
 $REPO_URL  = "https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin"
 $INSTALL_DIR = "$env:USERPROFILE\.claude-intel"
@@ -29,14 +36,12 @@ $INSTALL_DIR = "$env:USERPROFILE\.claude-intel"
 
 # ── Check git ─────────────────────────────────────────────────────────────────
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Write-Error @"
-git is required.
-Install options:
-  • winget install --id Git.Git
-  • https://git-scm.com/download/win
-  • choco install git
+    Die @"
+git is required. Install options:
+  winget install --id Git.Git
+  https://git-scm.com/download/win
+  choco install git
 "@
-    exit 1
 }
 
 # ── Check Python ──────────────────────────────────────────────────────────────
@@ -48,14 +53,12 @@ foreach ($cmd in @("python", "python3", "py")) {
     } catch {}
 }
 if (-not $python) {
-    Write-Error @"
-Python 3 is required.
-Install options:
-  • winget install --id Python.Python.3
-  • https://python.org/downloads
-  • Microsoft Store: search 'Python 3'
+    Die @"
+Python 3 is required. Install options:
+  winget install --id Python.Python.3
+  https://python.org/downloads
+  Microsoft Store: search 'Python 3'
 "@
-    exit 1
 }
 
 Write-Host "Using $python ($(& $python --version))"
@@ -68,8 +71,7 @@ if (Test-Path "$INSTALL_DIR\.git") {
         git -C $INSTALL_DIR pull --ff-only
         Write-Host "✓ Updated $INSTALL_DIR"
     } else {
-        Write-Error "$INSTALL_DIR exists but points to a different repo. Remove it and retry: rmdir /s /q `"$INSTALL_DIR`""
-        exit 1
+        Die "$INSTALL_DIR exists but points to a different repo. Remove it and retry: rmdir /s /q `"$INSTALL_DIR`""
     }
 } elseif (Test-Path $INSTALL_DIR) {
     Write-Host "Removing stale $INSTALL_DIR..."
@@ -81,16 +83,15 @@ if (Test-Path "$INSTALL_DIR\.git") {
     try {
         git clone $REPO_URL $INSTALL_DIR
     } catch {
-        Write-Error @"
-git clone failed. Possible causes:
-  • Firewall blocking github.com — set HTTPS_PROXY and retry
-  • Corporate SSL inspection — ask IT to whitelist github.com / raw.githubusercontent.com
-  • Defender quarantine — download zip manually from:
+        Die @"
+git clone failed. Try:
+  Firewall?      set HTTPS_PROXY=http://proxy:port and retry
+  SSL cert?      ask IT to whitelist github.com / raw.githubusercontent.com
+  Still blocked? download zip manually:
     $REPO_URL/archive/refs/heads/main.zip
-    Extract to $INSTALL_DIR and re-run this script.
+    Extract to $INSTALL_DIR then re-run this script.
 Error: $_
 "@
-        exit 1
     }
     Write-Host "✓ Cloned to $INSTALL_DIR"
 }
