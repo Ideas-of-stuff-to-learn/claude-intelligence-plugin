@@ -549,15 +549,19 @@ def print_repo_list_and_pick(repos: list) -> None:
 
     # Fixed column widths
     _NUM_W = 2              # digits in pick number
-    _BADGE_W = 4            # len('[ci]')
-    # Total prefix before content:  "  NN)  BBBB  " = 2+2+1+2+4+2 = 13
+    # Top-level entry prefix:  "  NN)  BBBB  " = 2+2+1+2+4+2 = 13 chars
+    # Sub-entry adds 4 leading spaces, so number starts at col 6 instead of 2
     _CONT = ' ' * 13        # continuation indent for remote/path lines
+    _SUB_PFX = '    '       # extra 4-space indent for sub-entries under a group
 
     def _badge(r: dict) -> str:
         return '[ci]' if r.get('has_plugin') else '    '
 
     def _entry(n: int, badge: str, content: str) -> str:
         return f"  {n:>{_NUM_W}})  {badge}  {content}"
+
+    def _entry_sub(n: int, badge: str, content: str) -> str:
+        return f"{_SUB_PFX}  {n:>{_NUM_W}})  {badge}  {content}"
 
     def _group_hdr(name: str, count: int) -> str:
         # No pick number — content starts at column 13 (same as _entry)
@@ -578,13 +582,13 @@ def print_repo_list_and_pick(repos: list) -> None:
                 print(f"{_CONT}remote: {canonical_url}")
                 print(f"{_CONT}{r['path']}")
             else:
-                # Multi-copy: header (no pick number), then one line per copy
+                # Multi-copy: header (no pick number), then indented sub-entries
                 print(_group_hdr(name, len(group)))
                 print(f"{_CONT}remote: {canonical_url}")
                 for r in group:
                     n = len(all_paths) + 1
                     all_paths.append(r['path'])
-                    print(_entry(n, _badge(r), r['path']))
+                    print(_entry_sub(n, _badge(r), r['path']))
             print()
 
     # ── Local only ────────────────────────────────────────────────────────
