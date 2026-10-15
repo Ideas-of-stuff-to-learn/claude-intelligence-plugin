@@ -36,6 +36,13 @@ else
     echo "✓ Cloned to ~/.claude-intel"
 fi
 
+# Strip Windows CRLF from the ci script — git with core.autocrlf=true
+# (common on Windows/WSL) can add \r even when .gitattributes says eol=lf,
+# and bash/sh reject a shebang of '#!/bin/sh\r' with "file not found".
+if command -v sed >/dev/null 2>&1; then
+    sed -i 's/\r//' "$INSTALL_DIR/ci"
+fi
+
 # Make ci executable
 chmod +x "$INSTALL_DIR/ci"
 echo "✓ Made ci executable"
