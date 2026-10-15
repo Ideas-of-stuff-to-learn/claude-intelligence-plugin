@@ -86,7 +86,7 @@ if [ -n "$RC_FILE" ]; then
     if [ -f "$RC_FILE" ] && grep -qF ".claude-intel" "$RC_FILE"; then
         echo "✓ PATH already set in $RC_FILE (skipping)"
     else
-        printf '\n# Claude Intelligence CLI\n%s\n' "$PATH_LINE" >> "$RC_FILE"
+        printf '\n# Claude Intelligence CLI\n%s\nalias cii="ci install"\n' "$PATH_LINE" >> "$RC_FILE"
         echo "✓ Added to PATH in $RC_FILE"
     fi
 else
