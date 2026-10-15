@@ -549,6 +549,24 @@ def _normalize_remote(url: str) -> str:
     return u.lower()
 
 
+def _nav_to(path: str) -> None:
+    """Write the target path to a temp file so the ci wrapper can cd there.
+
+    The ci.bat / ci shell function reads this file after Python exits and
+    runs 'cd /d' (Windows) or 'cd' (Unix).  A child process cannot change
+    the parent shell's directory directly; the wrapper is the bridge.
+    """
+    import tempfile
+    nav_file = os.path.join(tempfile.gettempdir(), 'ci_nav_dir.txt')
+    try:
+        with open(nav_file, 'w', encoding='utf-8') as f:
+            f.write(path)
+        print(f"\n  → {path}")
+    except Exception:
+        # Fallback: print the cd command so the user can do it manually
+        print(f"\n  cd \"{path}\"")
+
+
 def print_repo_list_and_pick(repos: list) -> None:
     """Print repos grouped by (normalized) remote URL.
 
@@ -673,7 +691,7 @@ def print_repo_list_and_pick(repos: list) -> None:
     entry = all_entries[idx]
 
     if isinstance(entry, str):
-        print(f"\n  cd \"{entry}\"")
+        _nav_to(entry)
     else:
         # Multi-copy: show a/b/c sub-menu
         print()
@@ -689,7 +707,7 @@ def print_repo_list_and_pick(repos: list) -> None:
             return
         si = ord(sub[0]) - ord('a')
         if len(sub) == 1 and 0 <= si < len(entry):
-            print(f"\n  cd \"{entry[si]}\"")
+            _nav_to(entry[si])
         else:
             print("Invalid selection.")
 

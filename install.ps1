@@ -101,8 +101,8 @@ Get-ChildItem -Path $INSTALL_DIR -Recurse -ErrorAction SilentlyContinue |
     ForEach-Object { Unblock-File -Path $_.FullName -ErrorAction SilentlyContinue }
 Write-Host "✓ Unblocked files (SmartScreen)"
 
-# ── Write ci.bat wrapper ──────────────────────────────────────────────────────
-$bat = "@echo off`r`n$python `"$INSTALL_DIR\.ai\intelligence_cli.py`" %*`r`n"
+# ── Write ci.bat wrapper (with repo-nav cd support) ──────────────────────────
+$bat = "@echo off`r`n$python `"$INSTALL_DIR\.ai\intelligence_cli.py`" %*`r`nif exist `"%TEMP%\ci_nav_dir.txt`" (`r`n  set /p CI_NAV=<`"%TEMP%\ci_nav_dir.txt`"`r`n  del `"%TEMP%\ci_nav_dir.txt`"`r`n  cd /d `"%CI_NAV%`"`r`n)`r`n"
 [System.IO.File]::WriteAllText("$INSTALL_DIR\ci.bat", $bat, [System.Text.Encoding]::ASCII)
 
 # ── Write cii.bat (alias for ci install) ─────────────────────────────────────

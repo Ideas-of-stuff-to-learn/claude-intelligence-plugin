@@ -97,47 +97,69 @@ fi
 # ── Detect shell rc and add PATH + alias ─────────────────────────────────────
 SHELL_NAME=$(basename "${SHELL:-sh}")
 RC_FILE=""
-ALIAS_LINE='alias cii="ci install"'
 
+# ci() shell function: runs ci, then cds if a nav file was written (ci repos navigation)
+# cii = shorthand for ci install
 case "$SHELL_NAME" in
-    zsh)   RC_FILE="$HOME/.zshrc"
-           PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
-    bash)  RC_FILE="$HOME/.bashrc"
-           PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
-    fish)  RC_FILE="$HOME/.config/fish/config.fish"
-           PATH_LINE='fish_add_path ~/.claude-intel'
-           ALIAS_LINE="alias cii='ci install'" ;;
+    zsh|bash)
+        case "$SHELL_NAME" in
+            zsh)  RC_FILE="$HOME/.zshrc" ;;
+            bash) RC_FILE="$HOME/.bashrc" ;;
+        esac
+        # macOS login shells use .bash_profile
+        if [ "$SHELL_NAME" = "bash" ] && [ "$(uname)" = "Darwin" ] && [ -f "$HOME/.bash_profile" ]; then
+            RC_FILE="$HOME/.bash_profile"
+        fi
+        SHELL_BLOCK='
+# Claude Intelligence CLI
+export PATH="$HOME/.claude-intel:$PATH"
+ci() { command ci "$@"; _f="$(mktemp -d)/ci_nav"; [ -f /tmp/ci_nav_dir.txt ] && { cd "$(cat /tmp/ci_nav_dir.txt)"; rm -f /tmp/ci_nav_dir.txt; }; }
+alias cii="ci install"'
+        ;;
+    fish)
+        RC_FILE="$HOME/.config/fish/config.fish"
+        SHELL_BLOCK="
+# Claude Intelligence CLI
+fish_add_path ~/.claude-intel
+function ci; command ci \$argv; if test -f /tmp/ci_nav_dir.txt; cd (cat /tmp/ci_nav_dir.txt); rm -f /tmp/ci_nav_dir.txt; end; end
+alias cii='ci install'"
+        ;;
     nu|nushell)
-           RC_FILE="$HOME/.config/nushell/config.nu"
-           PATH_LINE='$env.PATH = ($env.PATH | prepend ~/.claude-intel)'
-           ALIAS_LINE='alias cii = ci install' ;;
+        RC_FILE="$HOME/.config/nushell/config.nu"
+        # Nushell doesn't support shell functions in the same way; PATH + alias only
+        SHELL_BLOCK='
+# Claude Intelligence CLI
+$env.PATH = ($env.PATH | prepend ~/.claude-intel)
+alias cii = ci install'
+        ;;
     tcsh|csh)
-           RC_FILE="${HOME}/.tcshrc"
-           [ -f "$HOME/.cshrc" ] && RC_FILE="$HOME/.cshrc"
-           PATH_LINE='setenv PATH "$HOME/.claude-intel:$PATH"'
-           ALIAS_LINE='alias cii "ci install"' ;;
-    *)     # dash, sh, unknown — use .profile
-           RC_FILE="$HOME/.profile"
-           PATH_LINE='export PATH="$HOME/.claude-intel:$PATH"' ;;
+        RC_FILE="${HOME}/.tcshrc"
+        [ -f "$HOME/.cshrc" ] && RC_FILE="$HOME/.cshrc"
+        SHELL_BLOCK='
+# Claude Intelligence CLI
+setenv PATH "$HOME/.claude-intel:$PATH"
+alias cii "ci install"'
+        ;;
+    *)
+        RC_FILE="$HOME/.profile"
+        SHELL_BLOCK='
+# Claude Intelligence CLI
+export PATH="$HOME/.claude-intel:$PATH"
+alias cii="ci install"'
+        ;;
 esac
-
-# Also check .bash_profile for login shells on macOS
-if [ "$SHELL_NAME" = "bash" ] && [ "$(uname)" = "Darwin" ] && [ -f "$HOME/.bash_profile" ]; then
-    RC_FILE="$HOME/.bash_profile"
-fi
 
 if [ -n "$RC_FILE" ]; then
     mkdir -p "$(dirname "$RC_FILE")"
     if [ -f "$RC_FILE" ] && grep -qF ".claude-intel" "$RC_FILE" 2>/dev/null; then
         echo "✓ PATH already in $RC_FILE"
     else
-        printf '\n# Claude Intelligence CLI\n%s\n%s\n' "$PATH_LINE" "$ALIAS_LINE" >> "$RC_FILE"
-        echo "✓ Added PATH + alias to $RC_FILE"
+        printf '%s\n' "$SHELL_BLOCK" >> "$RC_FILE"
+        echo "✓ Added PATH + ci() function to $RC_FILE"
     fi
 else
     echo "Could not detect shell config. Add manually:"
-    echo "  $PATH_LINE"
-    echo "  $ALIAS_LINE"
+    echo "  export PATH=\"\$HOME/.claude-intel:\$PATH\""
 fi
 
 echo ""
