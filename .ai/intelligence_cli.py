@@ -327,9 +327,11 @@ def cmd_install(project_dir: str) -> None:
     if added_ai:
         print(f"✓ Patched/added {added_ai} .ai file(s)")
 
-    # Copy context templates only if context/ dir already exists
+    # Copy context templates — create context/ if it doesn't exist yet
     ctx_dst = project_dir / 'context'
     ctx_src = plugin_dir / 'templates' / 'context'
+    if ctx_src.exists():
+        ctx_dst.mkdir(exist_ok=True)
     if ctx_dst.exists() and ctx_src.exists():
         added_ctx = 0
         for tmpl in ctx_src.glob('*.md'):
@@ -339,6 +341,29 @@ def cmd_install(project_dir: str) -> None:
                 added_ctx += 1
         if added_ctx:
             print(f"✓ Added {added_ctx} missing context templates")
+
+    # Write .claude/settings.json if missing — required for hooks to fire in Claude Code
+    settings_path = project_dir / '.claude' / 'settings.json'
+    if not settings_path.exists():
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        hook_entries: dict = {}
+        hook_map = {
+            'SessionStart': ['session_start.py'],
+            'PreToolUse':   ['safe_point_guard.py', 'context_sync.py'],
+            'PostToolUse':  ['context_sync.py'],
+            'Stop':         ['check_handoff.py', 'task_complete_stats.py'],
+            'PreCompact':   ['precompact_snapshot.py'],
+        }
+        for ev, scripts in hook_map.items():
+            hooks_for_ev = [
+                {'type': 'command', 'command': f'python3 .claude/hooks/{h}'}
+                for h in scripts
+                if (project_dir / '.claude' / 'hooks' / h).exists()
+            ]
+            if hooks_for_ev:
+                hook_entries[ev] = hooks_for_ev
+        settings_path.write_text(json.dumps({'hooks': hook_entries}, indent=2))
+        print("✓ Created .claude/settings.json (hooks wired)")
 
     # Rebuild DB
     rebuild_script = project_dir / '.ai' / 'rebuild_db.py'
@@ -893,6 +918,8 @@ def main():
             print("ERROR: pentest_runner.py not found. Run: ci install")
             sys.exit(1)
         os.execv(sys.executable, [sys.executable, '-I', str(pentest_script)] + args[1:])
+    elif cmd == 'test':
+        cmd_surgical_test(proj, args[1:])
     elif cmd in ('help', '--help', '-h'):
         print("""ci — Claude Intelligence Plugin
 
@@ -911,6 +938,8 @@ COMMANDS
   sync             Sync context markdown files into index
   repos            List all registered repos (navigate to one)
   pentest <type> <target>  Sandboxed security scan (web|source|cli|docker|report)
+  test             Surgical test runner — only tests affected by recent changes
+  test --all       Run full test suite
   setup-alias      Add ci to PATH for your shell
   log-event <type> <component> <status>
   help             Show this message
@@ -918,6 +947,114 @@ COMMANDS
     else:
         print(f"Unknown command: {cmd}\nRun 'ci help' to see all commands.")
         sys.exit(1)
+
+
+def cmd_surgical_test(proj: Path, args: list) -> None:
+    """Surgical test runner: only run tests for changed/broken components.
+
+    Principles:
+    - Map recently changed files to their test IDs via git diff
+    - Run only those tests (not the full suite) unless --all is passed
+    - Zero in on failures, print them clearly
+    - Exit non-zero if any test fails
+    """
+    run_all = '--all' in args
+
+    test_dir = proj / 'tests'
+    if not test_dir.exists():
+        # Fall back to plugin dir
+        test_dir = Path(__file__).resolve().parent.parent / 'tests'
+    if not test_dir.exists():
+        print("No tests/ directory found. Run ci install first.")
+        sys.exit(1)
+
+    # --- Map source files → test node IDs ---
+    # Each entry: (glob_pattern_in_changed_files, [pytest_node_id, ...])
+    FILE_TO_TESTS = [
+        ('dashboard_server.py',  ['tests/test_new_features.py::test_dashboard_server_script_exists',
+                                   'tests/test_new_features.py::test_dashboard_cmd_resolves_server',
+                                   'tests/test_new_features.py::test_dashboard_security_api',
+                                   'tests/test_new_features.py::test_dashboard_security_api_with_report']),
+        ('pentest_runner.py',    ['tests/test_new_features.py::test_pentest_runner_exists',
+                                   'tests/test_new_features.py::test_pentest_pattern_scan',
+                                   'tests/test_new_features.py::test_pentest_docker_scan',
+                                   'tests/test_new_features.py::test_pentest_cli_dispatch']),
+        ('intelligence_cli.py', ['tests/test_new_features.py::test_export_context_runs',
+                                   'tests/test_new_features.py::test_export_context_to_file',
+                                   'tests/test_cli.py']),
+        ('rebuild_db.py',       ['tests/test_db.py']),
+        ('sync_context.py',     ['tests/test_cli.py']),
+        ('registry.py',         ['tests/test_registry.py']),
+        ('adapters/',           ['tests/test_new_features.py::test_cloud_llm_adapter_files_exist',
+                                   'tests/test_new_features.py::test_cloud_llm_readme_has_three_modes']),
+        ('agents/',             ['tests/test_new_features.py::test_pentest_agent_exists']),
+        ('skills/',             ['tests/test_new_features.py::test_pentest_skill_exists']),
+    ]
+
+    # Collect changed files via git diff (staged + unstaged vs HEAD)
+    changed: set = set()
+    if not run_all:
+        try:
+            r1 = subprocess.run(['git', '-C', str(proj), 'diff', '--name-only', 'HEAD'],
+                                capture_output=True, text=True)
+            r2 = subprocess.run(['git', '-C', str(proj), 'diff', '--name-only', '--cached'],
+                                capture_output=True, text=True)
+            changed = set((r1.stdout + r2.stdout).splitlines())
+            if not changed:
+                # Nothing uncommitted — look at last commit
+                r3 = subprocess.run(['git', '-C', str(proj), 'diff', '--name-only', 'HEAD~1', 'HEAD'],
+                                    capture_output=True, text=True)
+                changed = set(r3.stdout.splitlines())
+        except Exception:
+            changed = set()
+
+    if run_all or not changed:
+        if run_all:
+            print("Running full test suite (--all)...")
+        else:
+            print("No changed files detected — running full test suite...")
+        result = subprocess.run(
+            [sys.executable, '-m', 'pytest', str(test_dir), '-v', '--tb=short'],
+            cwd=str(proj)
+        )
+        sys.exit(result.returncode)
+
+    # Select tests that match changed files
+    selected: list = []
+    seen: set = set()
+    for changed_file in changed:
+        for pattern, test_ids in FILE_TO_TESTS:
+            if pattern in changed_file:
+                for tid in test_ids:
+                    if tid not in seen:
+                        seen.add(tid)
+                        selected.append(tid)
+
+    if not selected:
+        print(f"Changed files: {', '.join(sorted(changed))}")
+        print("No mapped tests for these files — running full suite to be safe...")
+        result = subprocess.run(
+            [sys.executable, '-m', 'pytest', str(test_dir), '-v', '--tb=short'],
+            cwd=str(proj)
+        )
+        sys.exit(result.returncode)
+
+    print(f"Changed: {', '.join(sorted(changed))}")
+    print(f"Surgical tests ({len(selected)}):")
+    for t in selected:
+        print(f"  {t}")
+    print()
+
+    result = subprocess.run(
+        [sys.executable, '-m', 'pytest'] + selected + ['-v', '--tb=short'],
+        cwd=str(proj)
+    )
+
+    if result.returncode != 0:
+        print("\n[ci test] FAILURES — zero in on the above and fix before pushing.")
+    else:
+        print("\n[ci test] All surgical tests GREEN.")
+    sys.exit(result.returncode)
 
 
 if __name__ == '__main__':

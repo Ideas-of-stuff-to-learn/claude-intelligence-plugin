@@ -133,12 +133,16 @@ def test_cmd_install_copies_hook_files():
         shutil.rmtree(str(proj))
 
 
-def test_cmd_install_does_not_create_context_dir():
-    """cmd_install does not create context/ when it doesn't already exist."""
+def test_cmd_install_creates_context_dir():
+    """cmd_install creates context/ with template files on a fresh project."""
     proj = make_temp_project()
     try:
         cmd_install(str(proj))
-        assert not (proj / 'context').exists(), "Should not create context/ dir"
+        ctx = proj / 'context'
+        # context/ should exist and contain template files
+        assert ctx.exists(), "ci install should create context/ directory"
+        mds = list(ctx.glob('*.md'))
+        assert len(mds) > 0, "context/ should contain at least one .md template"
     finally:
         shutil.rmtree(str(proj))
 

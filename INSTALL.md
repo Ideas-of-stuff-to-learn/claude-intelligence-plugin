@@ -128,7 +128,8 @@ This copies hooks, `.ai/` scripts, and context templates into the project. It th
 Installing claude-intel in: /path/to/your-project
 ✓ Patched/added 6 hook file(s)
 ✓ Patched/added 8 .ai file(s)
-✓ Added 14 missing context templates
+✓ Added 16 missing context templates
+✓ Created .claude/settings.json (hooks wired)
 ✓ Index rebuilt (83 files)
 ✓ Analysis complete (semantic, structural, exact)
 ✓ Registered in global registry
@@ -334,9 +335,15 @@ sudo apt install python3  # install if missing
 ci health
 ```
 
+**Run tests surgically (only tests for files you changed):**
+```bash
+ci test         # maps changed files → relevant tests, runs only those
+ci test --all   # full suite
+```
+
 **Re-run everything from scratch:**
 ```bash
-ci install    # re-copies files and rebuilds
+ci install    # re-copies files, creates context/, settings.json, and rebuilds
 ci rebuild    # rebuild the SQLite index only
 ci sync       # sync context docs into index only
 ```
@@ -404,4 +411,6 @@ ci rebuild                 # rebuild SQLite index
 ci sync                    # sync context docs
 ci export-context          # generate cloud LLM snapshot
 ci export-context --file   # write snapshot to .ai/cloud-context.txt
+ci test                    # surgical tests — only tests for recently changed files
+ci test --all              # run full test suite
 ```
