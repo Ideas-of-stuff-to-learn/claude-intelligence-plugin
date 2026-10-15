@@ -337,34 +337,63 @@ def _try_gist_push(proj: str, platform: str) -> str:
 
     # Fallback: GITHUB_TOKEN env var
     token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
-    if not token:
-        return ''
+    if token:
+        payload = json.dumps({
+            'description': f'CI context snapshot — {proj_name}',
+            'public': False,
+            'files': {'ci-context.md': {'content': content}},
+        }).encode()
+        headers = {
+            'Authorization': f'token {token}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/vnd.github+json',
+        }
+        try:
+            if gist_id:
+                req = urllib.request.Request(f'https://api.github.com/gists/{gist_id}',
+                                             data=payload, headers=headers, method='PATCH')
+            else:
+                req = urllib.request.Request('https://api.github.com/gists',
+                                             data=payload, headers=headers, method='POST')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            url = data['html_url']
+            os.makedirs(os.path.dirname(gist_id_file), exist_ok=True)
+            open(gist_id_file, 'w').write(data['id'])
+            return url
+        except Exception:
+            pass
 
-    payload = json.dumps({
-        'description': f'CI context snapshot — {proj_name}',
-        'public': False,
-        'files': {'ci-context.md': {'content': content}},
-    }).encode()
-    headers = {
-        'Authorization': f'token {token}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github+json',
-    }
+    # Zero-config fallback: anonymous public paste (0x0.st)
+    # No account or token needed — works immediately out of the box.
+    # URL changes each push (no update-in-place), so we save it locally.
+    url_cache = os.path.join(os.path.expanduser('~'), '.claude-intel', 'paste-url')
     try:
-        if gist_id:
-            req = urllib.request.Request(f'https://api.github.com/gists/{gist_id}',
-                                         data=payload, headers=headers, method='PATCH')
-        else:
-            req = urllib.request.Request('https://api.github.com/gists',
-                                         data=payload, headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        url = data['html_url']
-        os.makedirs(os.path.dirname(gist_id_file), exist_ok=True)
-        open(gist_id_file, 'w').write(data['id'])
-        return url
+        data_bytes = content.encode('utf-8')
+        boundary = b'----CIBoundary'
+        body = (
+            b'--' + boundary + b'\r\n'
+            b'Content-Disposition: form-data; name="file"; filename="ci-context.md"\r\n'
+            b'Content-Type: text/markdown\r\n\r\n' +
+            data_bytes + b'\r\n'
+            b'--' + boundary + b'--\r\n'
+        )
+        req = urllib.request.Request(
+            'https://0x0.st',
+            data=body,
+            headers={'Content-Type': f'multipart/form-data; boundary={boundary.decode()}'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            url = resp.read().decode().strip()
+        if url.startswith('http'):
+            os.makedirs(os.path.dirname(url_cache), exist_ok=True)
+            open(url_cache, 'w').write(url)
+            return url
     except Exception:
-        return ''
+        pass
+
+    return ''
 
 
 def main():

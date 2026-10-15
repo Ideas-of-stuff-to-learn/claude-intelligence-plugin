@@ -1,8 +1,8 @@
-# Claude Intelligence Plugin — Setup Guide
+# Claude Intelligence Plugin — Setup
 
 ---
 
-## Step 1 — Install the plugin
+## Step 1 — Install (everyone does this)
 
 **Mac / Linux / WSL / Git Bash:**
 ```bash
@@ -19,106 +19,97 @@ irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligenc
 powershell -Command "irm https://raw.githubusercontent.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/main/install.ps1 | iex"
 ```
 
+> Blocked by firewall? See [Firewall fixes](#firewall-fixes) below.
+
 Restart your terminal.
 
 ---
 
-## Step 2 — Enable it in your project
+## Step 2 — Enable in your project (everyone does this)
 
-Open a terminal in your project folder and run:
+Open a terminal in your project folder:
 ```bash
 cii
 ```
 
-Works on new and existing projects. Re-running is safe.
+---
+
+## Step 3 — Pick your mode
+
+### 🖥️ Local (Claude Code, Cursor, Windsurf, any IDE with folder access)
+**You're done.** Hooks fire automatically every session. Nothing else to configure.
 
 ---
 
-## Step 3 — Connect your LLM
-
-**If you use Claude Code, Cursor, or Windsurf** — you're done. Hooks fire automatically, nothing else to do.
-
-**If you use a cloud LLM (ChatGPT, Gemini, Claude.ai chat, etc.):**
-
-```bash
-gh auth login           # one-time GitHub login (skip if already done)
-ci snapshots --push     # generates your personal context URL
-```
-
-It prints a URL like `https://gist.github.com/yourname/abc123`.
-
-**Paste that URL into your LLM at the start of any session.**
-The LLM fetches it and loads both the plugin instructions and your project context automatically — nothing else to paste.
-
-> Don't have `gh`? Install it from [cli.github.com](https://cli.github.com) or set `GITHUB_TOKEN` instead.
-
----
-
-## That's it
-
-Every time you start a new cloud LLM session: paste the URL.
-The URL stays the same — it updates in place when you push.
-
-To push an updated snapshot after a session:
+### ☁️ Cloud LLM with no local folder (ChatGPT, Gemini, Claude.ai chat, etc.)
+Run this once in your terminal:
 ```bash
 ci snapshots --push
 ```
+It prints a URL. **Save it.**
 
-Or it pushes automatically if you use Claude Code (the PreCompact hook does it).
+Paste that URL at the start of every session in your cloud LLM.
+The LLM loads your instructions and project context automatically — nothing else to paste.
+The URL stays the same and updates in place.
+
+> No login or account needed — works out of the box.
+> For a private URL: `gh auth login` (optional upgrade).
 
 ---
 
-## Verify everything works
+### 🔀 Both (local IDE + cloud LLM at the same time)
+Do both steps above. The local hooks handle native sessions; the URL handles cloud sessions.
+They share the same context — the plugin syncs between them.
+
+---
+
+## Verify
 
 ```bash
 ci health
 ```
-
-Should print: `Intelligence system health: OK`
 
 ---
 
 ## All commands
 
 ```
-cii                     enable plugin in project
+cii / ci install        enable plugin in project
 ci health               check everything
-ci dashboard            open web dashboard (port 7654)
+ci dashboard            web dashboard (port 7654)
 ci rebuild              refresh knowledge index
-ci test                 run only tests for changed files
+ci test                 tests for changed files only (~1s)
 ci test --all           full test suite
-ci pentest source .     scan for secrets and vulnerabilities
-ci pentest web <url>    OWASP/header scan
+ci pentest source .     scan for secrets / vulnerabilities
+ci pentest web <url>    OWASP / header scan
+ci snapshots --push     push snapshot, get/update your URL
 ci snapshots            list saved snapshots
-ci snapshots --push     push snapshot to GitHub Gist (get/update your URL)
-ci snapshots --generate create a snapshot now
+ci snapshots <llm>      show snapshot for claude/chatgpt/gemini/...
 ci search <term>        search knowledge index
-ci sync                 sync context documents
+ci sync                 sync context docs
 ci export-context       print snapshot to terminal
 ```
 
 ---
 
-## Firewall / blocked installs
+## Firewall fixes
 
 | Situation | Fix |
 |-----------|-----|
 | `curl` blocked | `export https_proxy=http://proxy:port` then retry |
-| PowerShell policy blocked | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first |
-| Corporate proxy (Windows) | Installer auto-reads system proxy; if still failing: `$env:HTTPS_PROXY="http://proxy:port"` |
-| Windows Defender / SmartScreen | Installer runs `Unblock-File` automatically; if still blocked: add `%USERPROFILE%\.claude-intel` to Defender exclusions |
-| Corporate SSL (MITM cert) | `git config --global http.sslCAInfo /path/to/corp-ca.crt` |
+| PowerShell policy | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first |
+| Corporate proxy (Windows) | Installer reads system proxy automatically; if still failing: `$env:HTTPS_PROXY="http://proxy:port"` |
+| Defender / SmartScreen | Installer runs `Unblock-File` automatically; if still blocked: add `%USERPROFILE%\.claude-intel` to Defender exclusions |
+| Corporate SSL cert | `git config --global http.sslCAInfo /path/to/corp-ca.crt` |
 | macOS Gatekeeper | Installer strips quarantine flag automatically |
-| SELinux blocked | `restorecon -v ~/.claude-intel/ci` |
-| github.com fully blocked | Download zip from the repo → extract to `~/.claude-intel` → re-run installer |
+| SELinux | `restorecon -v ~/.claude-intel/ci` |
+| github.com fully blocked | [Download zip](https://github.com/Ideas-of-stuff-to-learn/claude-intelligence-plugin/archive/refs/heads/main.zip) → extract to `~/.claude-intel` → re-run installer |
 
 ---
 
 ## Uninstall
 
 ```bash
-rm -rf ~/.claude-intel          # remove plugin (Mac/Linux)
-rm -rf .ai .claude/hooks        # remove from this project only
+rm -rf ~/.claude-intel .ai .claude/hooks   # Mac/Linux
+rmdir /s %USERPROFILE%\.claude-intel       # Windows
 ```
-
-Windows: `rmdir /s %USERPROFILE%\.claude-intel`

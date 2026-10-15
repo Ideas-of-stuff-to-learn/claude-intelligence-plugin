@@ -1030,42 +1030,65 @@ def _gist_push(proj: Path, platform: str = 'generic') -> str:
 
     # Fallback: GitHub API with token from env
     token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
-    if not token:
-        raise RuntimeError(
-            'No GitHub auth found.\n'
-            '  Option 1 (recommended): install gh CLI → https://cli.github.com then: gh auth login\n'
-            '  Option 2: set GITHUB_TOKEN=<your-token> in your shell\n'
-            '  Get a token: https://github.com/settings/tokens (scope: gist)'
-        )
+    if token:
+        payload = json.dumps({
+            'description': f'CI context snapshot — {proj.name}',
+            'public': False,
+            'files': {'ci-context.md': {'content': content}},
+        }).encode()
+        headers = {
+            'Authorization': f'token {token}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/vnd.github+json',
+        }
+        if gist_id:
+            req = urllib.request.Request(f'https://api.github.com/gists/{gist_id}',
+                                         data=payload, headers=headers, method='PATCH')
+        else:
+            req = urllib.request.Request('https://api.github.com/gists',
+                                         data=payload, headers=headers, method='POST')
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            url = data['html_url']
+            gist_id_file.parent.mkdir(parents=True, exist_ok=True)
+            gist_id_file.write_text(data['id'])
+            return url
+        except Exception:
+            pass
 
-    payload = json.dumps({
-        'description': f'CI context snapshot — {proj.name}',
-        'public': False,
-        'files': {'ci-context.md': {'content': content}},
-    }).encode()
-
-    headers = {
-        'Authorization': f'token {token}',
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github+json',
-    }
-
-    if gist_id:
-        req = urllib.request.Request(f'https://api.github.com/gists/{gist_id}',
-                                     data=payload, headers=headers, method='PATCH')
-    else:
-        req = urllib.request.Request('https://api.github.com/gists',
-                                     data=payload, headers=headers, method='POST')
+    # Zero-config fallback: anonymous public paste (0x0.st) — no account needed
+    url_cache = Path.home() / '.claude-intel' / 'paste-url'
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        url = data['html_url']
-        new_id = data['id']
-        gist_id_file.parent.mkdir(parents=True, exist_ok=True)
-        gist_id_file.write_text(new_id)
-        return url
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f'GitHub API error {e.code}: {e.read().decode()[:200]}') from e
+        data_bytes = content.encode('utf-8')
+        boundary = b'----CIBoundary'
+        body = (
+            b'--' + boundary + b'\r\n'
+            b'Content-Disposition: form-data; name="file"; filename="ci-context.md"\r\n'
+            b'Content-Type: text/markdown\r\n\r\n' +
+            data_bytes + b'\r\n'
+            b'--' + boundary + b'--\r\n'
+        )
+        req = urllib.request.Request(
+            'https://0x0.st',
+            data=body,
+            headers={'Content-Type': f'multipart/form-data; boundary={boundary.decode()}'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            url = resp.read().decode().strip()
+        if url.startswith('http'):
+            url_cache.parent.mkdir(parents=True, exist_ok=True)
+            url_cache.write_text(url)
+            return url
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        'Could not reach any paste service.\n'
+        'For private uploads: gh auth login  (https://cli.github.com)\n'
+        'For manual push:     export GITHUB_TOKEN=<token> from https://github.com/settings/tokens'
+    )
 
 
 def cmd_snapshots(proj: Path, args: list) -> None:
